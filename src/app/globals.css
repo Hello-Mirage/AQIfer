@@ -172,6 +172,15 @@ button {
   color: var(--ink);
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 /* Widescreen 2-Column Grid Layout: min-width: 0 ensures no horizontal spill */
 .main-screen-grid {
   display: grid;
