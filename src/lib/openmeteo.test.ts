@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getAQICategory, parseOpenMeteoAirQuality, createFallbackAQIData } from "./openmeteo";
+import { extractCityCandidate } from "./location";
 
 describe("Open-Meteo Air Quality parser and fallbacks", () => {
   it("correctly classifies AQI categories according to EPA standards", () => {
@@ -54,5 +55,20 @@ describe("Open-Meteo Air Quality parser and fallbacks", () => {
   it("throws error when invalid data format is passed", () => {
     expect(() => parseOpenMeteoAirQuality(null as any)).toThrow("Invalid Open-Meteo response format");
     expect(() => parseOpenMeteoAirQuality({ hourly: {} })).toThrow("Invalid Open-Meteo response format");
+  });
+
+  it("extracts city candidate properly and ignores non-city activity words", () => {
+    // Should NOT extract activity words as cities
+    expect(extractCityCandidate("How bad is the visibility for driving right now?")).toBeNull();
+    expect(extractCityCandidate("Can I go out for walking?")).toBeNull();
+    expect(extractCityCandidate("Is it safe for kids right now?")).toBeNull();
+    expect(extractCityCandidate("Is it safe in the morning?")).toBeNull();
+
+    // Should accurately extract real city queries
+    expect(extractCityCandidate("what is the air quality in kozhikode")).toBe("kozhikode");
+    expect(extractCityCandidate("what is the currect aqi in kozhikode")).toBe("kozhikode");
+    expect(extractCityCandidate("what is the aqi in west bengal haldia")).toBe("west bengal haldia");
+    expect(extractCityCandidate("is it safe in Mumbai today?")).toBe("Mumbai");
+    expect(extractCityCandidate("Kolkata aqi")).toBe("Kolkata");
   });
 });
