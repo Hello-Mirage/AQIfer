@@ -5,31 +5,28 @@ import { FamilyProfile, HourlyAQIPoint, AISmogPlan } from "@/types";
 export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
+  let city = "Your City";
+  let forecast24h: HourlyAQIPoint[] = [];
+  let familyProfile: FamilyProfile = {
+    members: ["School Kids"],
+    commute: "Two-wheeler",
+    homeSetup: "Natural Ventilation",
+  };
+
   try {
     const body = await req.json();
-    const {
-      city = "Your City",
-      forecast24h = [],
-      familyProfile = {
-        members: ["School Kids"],
-        commute: "Two-wheeler",
-        homeSetup: "Natural Ventilation",
-      },
-    }: {
-      city: string;
-      forecast24h: HourlyAQIPoint[];
-      familyProfile: FamilyProfile;
-    } = body;
+    city = body.city || "Your City";
+    forecast24h = body.forecast24h || [];
+    familyProfile = body.familyProfile || familyProfile;
 
     const gemini = getGeminiClient();
 
     if (!gemini) {
-      // Graceful fallback plan if GEMINI_API_KEY is not configured
       const fallbackPlan = generateHeuristicSmogPlan(city, forecast24h, familyProfile);
       return NextResponse.json(fallbackPlan);
     }
 
-    // Prepare concise prompt with 24 hours of forecast data & profile
+    // Prepare concise prompt
     const forecastSummary = forecast24h
       .slice(0, 24)
       .map(
@@ -56,42 +53,36 @@ Requirements:
 3. Sustainable Commute Swap: 1 realistic low-emission or exposure-reducing alternative for their commute (${familyProfile.commute}) with clear direct health and tailpipe pollution reduction reasoning.
 4. Explanations: Every single recommendation must clearly explain the direct health or environmental impact.`;
 
-    const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: smogPlanResponseSchema,
-        temperature: 0.2,
-      },
-    });
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    let lastError = null;
 
-    const text = response.text;
-    if (!text) {
-      throw new Error("Empty response from Gemini");
-    }
+    for (const model of modelsToTry) {
+      try {
+        const response = await gemini.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: smogPlanResponseSchema,
+            temperature: 0.2,
+          },
+        });
 
-    const plan: AISmogPlan = JSON.parse(text);
-    return NextResponse.json(plan);
-  } catch (error: any) {
-    console.error("Gemini API error, using heuristic fallback:", error);
-    try {
-      const body = await req.json().catch(() => ({}));
-      const fallback = generateHeuristicSmogPlan(
-        body.city || "Selected City",
-        body.forecast24h || [],
-        body.familyProfile || {
-          members: [],
-          commute: "Public Transit",
-          homeSetup: "Natural Ventilation",
+        const text = response.text;
+        if (text) {
+          const plan: AISmogPlan = JSON.parse(text);
+          return NextResponse.json(plan);
         }
-      );
-      return NextResponse.json(fallback);
-    } catch {
-      return NextResponse.json(
-        { error: "Failed to generate AI Smog Plan" },
-        { status: 500 }
-      );
+      } catch (err: any) {
+        console.warn(`Model ${model} plan generation error:`, err.message);
+        lastError = err;
+      }
     }
+
+    throw lastError || new Error("All Gemini models failed for plan generation");
+  } catch (error: any) {
+    console.warn("Using heuristic smog plan fallback:", error.message);
+    const fallback = generateHeuristicSmogPlan(city, forecast24h, familyProfile);
+    return NextResponse.json(fallback);
   }
 }

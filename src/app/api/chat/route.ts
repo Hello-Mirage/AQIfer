@@ -17,7 +17,7 @@ function extractCityCandidate(question: string): string | null {
     if (candidate.length > 2) return candidate;
   }
 
-  // Pattern 2: "<city> aqi", "<city> air quality", "<city> smog", "is it safe in <city>"
+  // Pattern 2: "<city> aqi", "<city> air quality", "<city> smog"
   const prefixMatch = cleanQ.match(/^([A-Za-z\s]+?)\s+(?:aqi|air quality|smog|pollution|weather)/i);
   if (prefixMatch && prefixMatch[1]) {
     let candidate = prefixMatch[1]
@@ -26,7 +26,7 @@ function extractCityCandidate(question: string): string | null {
     if (candidate.length > 2) return candidate;
   }
 
-  // Pattern 3: Check if any preset city or major city is mentioned anywhere in the question
+  // Pattern 3: Check if any preset city is mentioned anywhere in the question
   for (const preset of INDIAN_PRESET_CITIES) {
     if (new RegExp(`\\b${preset.name}\\b`, "i").test(cleanQ)) {
       return preset.name;
@@ -86,38 +86,118 @@ async function findCityLocation(candidate: string) {
   return null;
 }
 
+function generateSmartHeuristicAnswer(
+  question: string,
+  targetCity: string,
+  curAqi: number,
+  curPm25: number,
+  curVis: number,
+  curCat: string,
+  targetCurrent: CurrentAQI | undefined,
+  familyProfile: FamilyProfile
+): string {
+  const lowerQ = question.toLowerCase();
+
+  if (
+    lowerQ.includes("aqi") ||
+    lowerQ.includes("air quality") ||
+    lowerQ.includes("how is the air") ||
+    lowerQ.includes("pollution") ||
+    lowerQ.includes("pm2.5")
+  ) {
+    return `In ${targetCity}, the live US AQI is currently ${curAqi} (${curCat}) with PM2.5 concentration at ${curPm25} µg/m³ and visibility around ${curVis} km. ${
+      curAqi >= 200
+        ? "Air quality is very unhealthy. Keep windows shut, run indoor filtration, and delay non-emergency travel."
+        : curAqi >= 100
+        ? "Air quality is unhealthy for sensitive groups. A well-fitted N95 mask is strongly advised if you need to step out."
+        : "Air quality is currently in an acceptable range for outdoor activities."
+    }`;
+  }
+
+  if (lowerQ.includes("visibility") || lowerQ.includes("see") || lowerQ.includes("fog") || lowerQ.includes("drive")) {
+    return `Current visibility in ${targetCity} is approximately ${curVis} km (${
+      targetCurrent?.visibilityCondition || "Particulate Haze"
+    }). Road visibility is noticeably reduced by smog. If driving, use low-beam fog lights, leave extra following distance, and keep cabin AC on recirculation.`;
+  }
+
+  if (
+    lowerQ.includes("go out") ||
+    lowerQ.includes("can i go") ||
+    lowerQ.includes("safe") ||
+    lowerQ.includes("walk") ||
+    lowerQ.includes("run") ||
+    lowerQ.includes("outside")
+  ) {
+    const canGo = curAqi < 120 && curPm25 < 60;
+    if (canGo) {
+      return `Yes, right now air quality in ${targetCity} is acceptable (AQI ${curAqi}, PM2.5 ${curPm25} µg/m³). You can go out, but monitor evening inversion hours when soot settles.`;
+    } else {
+      return `No, stepping out right now in ${targetCity} is NOT recommended (AQI is ${curAqi} - ${curCat}, PM2.5 is ${curPm25} µg/m³). Inhaling fine particulate soot strains lungs and heart. If ${
+        familyProfile.members.length > 0 ? familyProfile.members.join(" or ") : "anyone"
+      } must go out, strictly wear an airtight N95 mask. Safest window is early afternoon (12 PM - 3 PM).`;
+    }
+  }
+
+  if (lowerQ.includes("5 pm") || lowerQ.includes("evening") || lowerQ.includes("kids")) {
+    return `Around 5 PM in ${targetCity}, PM2.5 rises rapidly as evening traffic emissions collide with the sinking winter boundary layer. It is NOT safe for children or sensitive individuals to exercise outdoors at 5 PM.`;
+  }
+
+  return `In ${targetCity}, current AQI is ${curAqi} (${curCat}) with PM2.5 at ${curPm25} µg/m³ and visibility around ${curVis} km. Limit outdoor exertion and keep indoor spaces sealed during peak smog hours.`;
+}
+
+async function callGeminiWithFallback(gemini: any, prompt: string): Promise<string> {
+  // Support gemini-2.5-flash with automatic resilient fallback to 2.0-flash and 1.5-flash
+  const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastErr = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await gemini.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.2,
+        },
+      });
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      console.warn(`Model ${model} invocation attempt:`, err.message);
+      lastErr = err;
+    }
+  }
+
+  throw lastErr || new Error("All Gemini models exhausted");
+}
+
 export async function POST(req: NextRequest) {
+  let targetCity = "Delhi";
+  let curAqi = 150;
+  let curPm25 = 110;
+  let curVis = 1.8;
+  let curCat = "Unhealthy";
+  let targetCurrent: CurrentAQI | undefined = undefined;
+  let familyProfile: FamilyProfile = {
+    members: [],
+    commute: "Two-wheeler",
+    homeSetup: "Natural Ventilation",
+  };
+  let question = "";
+
   try {
     const body = await req.json();
-    let {
-      question,
-      city = "Delhi",
-      current,
-      forecast24h = [],
-      familyProfile = {
-        members: [],
-        commute: "Two-wheeler",
-        homeSetup: "Natural Ventilation",
-      },
-    }: {
-      question: string;
-      city: string;
-      current?: CurrentAQI;
-      forecast24h: HourlyAQIPoint[];
-      familyProfile: FamilyProfile;
-    } = body;
+    question = body.question || "";
+    targetCity = body.city || "Delhi";
+    targetCurrent = body.current;
+    let targetForecast: HourlyAQIPoint[] = body.forecast24h || [];
+    familyProfile = body.familyProfile || familyProfile;
 
     if (!question || question.trim().length === 0) {
       return NextResponse.json({ answer: "Please ask a question about your city's air quality or outdoor safety." });
     }
 
-    const lowerQ = question.toLowerCase();
-
     // Check if the user is asking about another city
-    let targetCity = city;
-    let targetCurrent = current;
-    let targetForecast = forecast24h;
-
     const cityCandidate = extractCityCandidate(question);
     if (cityCandidate) {
       const location = await findCityLocation(cityCandidate);
@@ -138,10 +218,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const curVis = targetCurrent?.visibilityKm ?? 1.8;
-    const curAqi = targetCurrent?.us_aqi ?? 150;
-    const curPm25 = targetCurrent?.pm2_5 ?? 110;
-    const curCat = targetCurrent?.category ?? "Unhealthy";
+    curVis = targetCurrent?.visibilityKm ?? 1.8;
+    curAqi = targetCurrent?.us_aqi ?? 150;
+    curPm25 = targetCurrent?.pm2_5 ?? 110;
+    curCat = targetCurrent?.category ?? "Unhealthy";
 
     const gemini = getGeminiClient();
 
@@ -155,32 +235,17 @@ export async function POST(req: NextRequest) {
       .join("; ");
 
     if (!gemini) {
-      // Smart grounded heuristic fallback
-      let answer = "";
-      if (lowerQ.includes("what is the aqi") || lowerQ.includes("air quality") || lowerQ.includes("how is the air")) {
-        answer = `In ${targetCity}, the live US AQI is currently ${curAqi} (${curCat}) with PM2.5 at ${curPm25} µg/m³ and visibility around ${curVis} km. ${
-          curAqi >= 200
-            ? "Air quality is very unhealthy. Keep windows shut and stay indoors."
-            : curAqi >= 100
-            ? "Air quality is unhealthy for sensitive groups. Wear an N95 mask if stepping out."
-            : "Air quality is within acceptable limits."
-        }`;
-      } else if (lowerQ.includes("visibility") || lowerQ.includes("see") || lowerQ.includes("fog") || lowerQ.includes("drive")) {
-        answer = `Current visibility in ${targetCity} is approximately ${curVis} km (${targetCurrent?.visibilityCondition || "Hazy"}). Road visibility is impaired by particulate smog. Use low-beam fog lights, keep vehicle windows rolled up, and leave extra following distance.`;
-      } else if (lowerQ.includes("go out") || lowerQ.includes("can i go") || lowerQ.includes("safe") || lowerQ.includes("walk") || lowerQ.includes("run") || lowerQ.includes("outside")) {
-        const canGo = curAqi < 120 && curPm25 < 60;
-        if (canGo) {
-          answer = `Yes, right now air quality in ${targetCity} is acceptable (AQI ${curAqi}, PM2.5 ${curPm25} µg/m³). You can go out, but monitor evening inversion hours.`;
-        } else {
-          answer = `No, going out right now in ${targetCity} is NOT recommended (AQI is ${curAqi} - ${curCat}, PM2.5 is ${curPm25} µg/m³). Inhaling this soot strains lungs and heart. If ${
-            familyProfile.members.length > 0 ? familyProfile.members.join(" or ") : "anyone"
-          } must step out, strictly wear a well-fitted N95 mask. Safest window is early afternoon (12 PM - 3 PM).`;
-        }
-      } else if (lowerQ.includes("5 pm") || lowerQ.includes("evening")) {
-        answer = `Around 5 PM in ${targetCity}, PM2.5 rises as evening traffic emissions collide with the sinking boundary layer. It is NOT safe for children or sensitive individuals to exercise outdoors at 5 PM.`;
-      } else {
-        answer = `In ${targetCity}, current AQI is ${curAqi} (${curCat}) with PM2.5 at ${curPm25} µg/m³ and visibility at ${curVis} km. Limit outdoor exertion and keep indoor spaces sealed during peak smog hours.`;
-      }
+      // Use grounded heuristic fallback
+      const answer = generateSmartHeuristicAnswer(
+        question,
+        targetCity,
+        curAqi,
+        curPm25,
+        curVis,
+        curCat,
+        targetCurrent,
+        familyProfile
+      );
       return NextResponse.json({ answer });
     }
 
@@ -204,20 +269,35 @@ Instructions:
 3. If they ask if it's safe to go out, provide an unambiguous verdict ("Do not go out right now", "Safe with an N95", or "Yes, safe").
 4. Keep the tone helpful, direct, and actionable in 2-4 sentences.`;
 
-    const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        temperature: 0.2,
-      },
-    });
-
-    const answer = response.text || `In ${targetCity}, the live AQI is currently ${curAqi} (${curCat}) with PM2.5 at ${curPm25} µg/m³.`;
-    return NextResponse.json({ answer });
+    try {
+      const text = await callGeminiWithFallback(gemini, prompt);
+      return NextResponse.json({ answer: text });
+    } catch (genError) {
+      console.warn("Gemini call failed, utilizing smart heuristic response:", genError);
+      const answer = generateSmartHeuristicAnswer(
+        question,
+        targetCity,
+        curAqi,
+        curPm25,
+        curVis,
+        curCat,
+        targetCurrent,
+        familyProfile
+      );
+      return NextResponse.json({ answer });
+    }
   } catch (error: any) {
     console.error("Chat API error:", error);
-    return NextResponse.json({
-      answer: "Current air quality is degraded. We recommend remaining indoors and limiting outdoor exertion.",
-    });
+    const fallbackAnswer = generateSmartHeuristicAnswer(
+      question || "general query",
+      targetCity,
+      curAqi,
+      curPm25,
+      curVis,
+      curCat,
+      targetCurrent,
+      familyProfile
+    );
+    return NextResponse.json({ answer: fallbackAnswer });
   }
 }
