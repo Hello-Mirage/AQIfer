@@ -158,3 +158,50 @@ export function generateHeuristicSmogPlan(
     },
   };
 }
+
+export const GEMINI_MODEL_CASCADE = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+] as const;
+
+/**
+ * Invoke Gemini across a resilient model cascade (2.5-flash -> 2.0-flash -> 1.5-flash).
+ * Returns null if no client is available or all models fail.
+ */
+export async function generateWithGeminiFallback(
+  gemini: GoogleGenAI | null,
+  prompt: string,
+  options?: {
+    responseSchema?: Schema;
+    temperature?: number;
+  }
+): Promise<string | null> {
+  if (!gemini) return null;
+
+  for (const model of GEMINI_MODEL_CASCADE) {
+    try {
+      const config: Record<string, unknown> = {
+        temperature: options?.temperature ?? 0.2,
+      };
+      if (options?.responseSchema) {
+        config.responseMimeType = "application/json";
+        config.responseSchema = options.responseSchema;
+      }
+
+      const response = await gemini.models.generateContent({
+        model,
+        contents: prompt,
+        config,
+      });
+
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      console.warn(`Gemini model ${model} failed:`, err?.message || err);
+    }
+  }
+
+  return null;
+}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGeminiClient } from "@/lib/gemini";
+import { getGeminiClient, generateWithGeminiFallback } from "@/lib/gemini";
 import { FamilyProfile, HourlyAQIPoint, CurrentAQI, ParsedAQIData } from "@/types";
 import { parseOpenMeteoAirQuality } from "@/lib/openmeteo";
 import { extractCityCandidate, findCityLocation } from "@/lib/location";
@@ -63,32 +63,6 @@ function generateSmartHeuristicAnswer(
   }
 
   return `In ${targetCity}, current AQI is ${curAqi} (${curCat}) with PM2.5 at ${curPm25} µg/m³ and visibility around ${curVis} km. Limit outdoor exertion and keep indoor spaces sealed during peak smog hours.`;
-}
-
-async function callGeminiWithFallback(gemini: any, prompt: string): Promise<string> {
-  // Support gemini-2.5-flash with automatic resilient fallback to 2.0-flash and 1.5-flash
-  const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-  let lastErr = null;
-
-  for (const model of modelsToTry) {
-    try {
-      const response = await gemini.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          temperature: 0.2,
-        },
-      });
-      if (response && response.text) {
-        return response.text;
-      }
-    } catch (err: any) {
-      console.warn(`Model ${model} invocation attempt:`, err.message);
-      lastErr = err;
-    }
-  }
-
-  throw lastErr || new Error("All Gemini models exhausted");
 }
 
 export async function POST(req: NextRequest) {
@@ -189,23 +163,22 @@ Instructions:
 3. If they ask if it's safe to go out, provide an unambiguous verdict ("Do not go out right now", "Safe with an N95", or "Yes, safe").
 4. Keep the tone helpful, direct, and actionable in 2-4 sentences.`;
 
-    try {
-      const text = await callGeminiWithFallback(gemini, prompt);
+    const text = await generateWithGeminiFallback(gemini, prompt, { temperature: 0.2 });
+    if (text) {
       return NextResponse.json({ answer: text });
-    } catch (genError) {
-      console.warn("Gemini call failed, utilizing smart heuristic response:", genError);
-      const answer = generateSmartHeuristicAnswer(
-        question,
-        targetCity,
-        curAqi,
-        curPm25,
-        curVis,
-        curCat,
-        targetCurrent,
-        familyProfile
-      );
-      return NextResponse.json({ answer });
     }
+
+    const answer = generateSmartHeuristicAnswer(
+      question,
+      targetCity,
+      curAqi,
+      curPm25,
+      curVis,
+      curCat,
+      targetCurrent,
+      familyProfile
+    );
+    return NextResponse.json({ answer });
   } catch (error: any) {
     console.error("Chat API error:", error);
     const fallbackAnswer = generateSmartHeuristicAnswer(

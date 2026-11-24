@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGeminiClient, smogPlanResponseSchema, generateHeuristicSmogPlan } from "@/lib/gemini";
+import {
+  getGeminiClient,
+  smogPlanResponseSchema,
+  generateHeuristicSmogPlan,
+  generateWithGeminiFallback,
+} from "@/lib/gemini";
 import { FamilyProfile, HourlyAQIPoint, AISmogPlan } from "@/types";
 
 export const runtime = "edge";
@@ -53,33 +58,17 @@ Requirements:
 3. Sustainable Commute Swap: 1 realistic low-emission or exposure-reducing alternative for their commute (${familyProfile.commute}) with clear direct health and tailpipe pollution reduction reasoning.
 4. Explanations: Every single recommendation must clearly explain the direct health or environmental impact.`;
 
-    const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-    let lastError = null;
-
-    for (const model of modelsToTry) {
-      try {
-        const response = await gemini.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: smogPlanResponseSchema,
-            temperature: 0.2,
-          },
-        });
-
-        const text = response.text;
-        if (text) {
-          const plan: AISmogPlan = JSON.parse(text);
-          return NextResponse.json(plan);
-        }
-      } catch (err: any) {
-        console.warn(`Model ${model} plan generation error:`, err.message);
-        lastError = err;
-      }
+    const text = await generateWithGeminiFallback(gemini, prompt, {
+      responseSchema: smogPlanResponseSchema,
+      temperature: 0.2,
+    });
+    if (text) {
+      const plan: AISmogPlan = JSON.parse(text);
+      return NextResponse.json(plan);
     }
 
-    throw lastError || new Error("All Gemini models failed for plan generation");
+    const fallbackPlan = generateHeuristicSmogPlan(city, forecast24h, familyProfile);
+    return NextResponse.json(fallbackPlan);
   } catch (error: any) {
     console.warn("Using heuristic smog plan fallback:", error.message);
     const fallback = generateHeuristicSmogPlan(city, forecast24h, familyProfile);
