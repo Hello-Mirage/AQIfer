@@ -85,7 +85,7 @@ export function OutdoorVerdictHero({
             </div>
             <div>
               <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 block">
-                Aqifier Outdoor Safety Verdict
+                AQIfer Outdoor Safety Verdict
               </span>
               <span className="text-xs text-slate-400">
                 Live Environmental Assessment for {city}

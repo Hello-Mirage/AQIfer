@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ answer });
     }
 
-    const prompt = `You are Aqifier's Intelligent Air Quality & Outdoor Safety Assistant.
+    const prompt = `You are AQIfer's Intelligent Air Quality & Outdoor Safety Assistant.
 The user is asking: "${question}"
 
 Target City Context (${targetCity}):
