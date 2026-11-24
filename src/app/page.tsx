@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
 import { CityLocation, ParsedAQIData, FamilyProfile, AISmogPlan, ChatMessage } from "@/types";
 import {
   INDIAN_PRESET_CITIES,
@@ -9,6 +10,15 @@ import {
   createFallbackAQIData,
 } from "@/lib/openmeteo";
 import { RefreshCw } from "lucide-react";
+
+const AirQualityMap = dynamic(() => import("@/components/AirQualityMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="panel" style={{ height: "420px", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mute)" }}>
+      Loading OpenStreetMap air quality view...
+    </div>
+  ),
+});
 
 export default function AQIferApp() {
   const [cityList, setCityList] = useState<CityLocation[]>(INDIAN_PRESET_CITIES);
@@ -627,6 +637,9 @@ export default function AQIferApp() {
               </span>
             </div>
           </div>
+
+          {/* OpenStreetMap Live AQI & AI Route Safety Planner */}
+          <AirQualityMap location={currentLocation} familyProfile={familyProfile} />
         </div>
 
         {/* Right Sticky Column: Clean Chat Panel with Dropdown Detailed Info Overlay */}

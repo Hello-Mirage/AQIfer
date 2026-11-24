@@ -89,3 +89,46 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
 }
+
+export interface AQIGridPoint {
+  latitude: number;
+  longitude: number;
+  us_aqi: number;
+  pm2_5: number;
+  category: AQICategory;
+  color: string;
+  label?: string;
+}
+
+export interface RouteWaypointAQI {
+  latitude: number;
+  longitude: number;
+  us_aqi: number;
+  pm2_5: number;
+  category: AQICategory;
+  color: string;
+}
+
+export interface EvaluatedRoute {
+  index: number;
+  label: string;
+  distanceKm: number;
+  durationMin: number;
+  avgAqi: number;
+  maxAqi: number;
+  avgPm25: number;
+  coordinates: [number, number][]; // [lat, lon] pairs for Leaflet
+  waypoints: RouteWaypointAQI[];
+  color: string;
+}
+
+export interface RouteSafetyResult {
+  origin: { name: string; latitude: number; longitude: number };
+  destination: { name: string; latitude: number; longitude: number };
+  routes: EvaluatedRoute[];
+  recommendedRouteIndex: number;
+  verdict: "SAFE" | "CAUTION" | "AVOID";
+  verdictHeadline: string;
+  analysis: string;
+  betterRouteSuggestion: string;
+}
