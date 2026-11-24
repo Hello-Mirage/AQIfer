@@ -35,7 +35,7 @@ export default function AqifierApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>("");
   const [isAskingChat, setIsAskingChat] = useState<boolean>(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch AQI Data (Open-Meteo or Fallback)
   const loadData = useCallback(async (cityName: string, custom?: number | null) => {
@@ -255,10 +255,13 @@ export default function AqifierApp() {
     }
   };
 
-  // Scroll chat to bottom
+  // Scroll chat messages container smoothly to bottom (without scrolling parent window)
   useEffect(() => {
-    if (!isDetailedPlanOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!isDetailedPlanOpen && chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
   }, [messages, isAskingChat, isDetailedPlanOpen]);
 
@@ -753,6 +756,7 @@ export default function AqifierApp() {
 
                 {/* Conversation Messages */}
                 <div
+                  ref={chatContainerRef}
                   style={{
                     flex: 1,
                     overflowY: "auto",
@@ -819,7 +823,6 @@ export default function AqifierApp() {
                       </div>
                     </div>
                   )}
-                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Chat Input Bar */}
