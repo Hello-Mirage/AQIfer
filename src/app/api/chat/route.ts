@@ -5,6 +5,87 @@ import { INDIAN_PRESET_CITIES, parseOpenMeteoAirQuality } from "@/lib/openmeteo"
 
 export const runtime = "edge";
 
+function extractCityCandidate(question: string): string | null {
+  const cleanQ = question.replace(/[?.,!]/g, " ").trim();
+
+  // Pattern 1: "... in/of/for/at <city>"
+  const prepMatch = cleanQ.match(/\b(?:in|of|for|at)\s+([A-Za-z\s]+)$/i);
+  if (prepMatch && prepMatch[1]) {
+    let candidate = prepMatch[1]
+      .replace(/\b(right now|today|currently|tomorrow|please|tonight|this morning|this afternoon|this evening)\b/gi, "")
+      .trim();
+    if (candidate.length > 2) return candidate;
+  }
+
+  // Pattern 2: "<city> aqi", "<city> air quality", "<city> smog", "is it safe in <city>"
+  const prefixMatch = cleanQ.match(/^([A-Za-z\s]+?)\s+(?:aqi|air quality|smog|pollution|weather)/i);
+  if (prefixMatch && prefixMatch[1]) {
+    let candidate = prefixMatch[1]
+      .replace(/\b(how is|what is|tell me|check|give me)\b/gi, "")
+      .trim();
+    if (candidate.length > 2) return candidate;
+  }
+
+  // Pattern 3: Check if any preset city or major city is mentioned anywhere in the question
+  for (const preset of INDIAN_PRESET_CITIES) {
+    if (new RegExp(`\\b${preset.name}\\b`, "i").test(cleanQ)) {
+      return preset.name;
+    }
+  }
+
+  return null;
+}
+
+async function findCityLocation(candidate: string) {
+  const candLower = candidate.toLowerCase();
+
+  // 1. Check Indian preset cities
+  const matchedPreset = INDIAN_PRESET_CITIES.find(
+    (p) => candLower.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(candLower)
+  );
+  if (matchedPreset) {
+    return {
+      name: `${matchedPreset.name}, ${matchedPreset.admin1 || "India"}`,
+      latitude: matchedPreset.latitude,
+      longitude: matchedPreset.longitude,
+    };
+  }
+
+  // 2. Query Open-Meteo Geocoding
+  const tryQueries = [candidate];
+  const words = candidate.split(/\s+/).filter((w) => w.length > 2);
+  if (words.length > 1) {
+    tryQueries.push(words[words.length - 1]); // e.g. "Haldia" if candidate was "West Bengal Haldia"
+    tryQueries.push(words[0]);
+  }
+
+  for (const q of tryQueries) {
+    try {
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+        q
+      )}&count=1&language=en&format=json`;
+      const geoRes = await fetch(geoUrl);
+      if (geoRes.ok) {
+        const geoData = await geoRes.json();
+        if (geoData.results && geoData.results[0]) {
+          const place = geoData.results[0];
+          return {
+            name: `${place.name}${place.admin1 ? ", " + place.admin1 : ""}${
+              place.country ? " (" + place.country + ")" : ""
+            }`,
+            latitude: place.latitude,
+            longitude: place.longitude,
+          };
+        }
+      }
+    } catch (e) {
+      // Continue to next query attempt
+    }
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -32,65 +113,27 @@ export async function POST(req: NextRequest) {
 
     const lowerQ = question.toLowerCase();
 
-    // Check if the user is asking about another city (e.g. "what is the aqi in Haldia / Kolkata / Mumbai")
+    // Check if the user is asking about another city
     let targetCity = city;
     let targetCurrent = current;
     let targetForecast = forecast24h;
 
-    // Check preset cities first
-    for (const preset of INDIAN_PRESET_CITIES) {
-      if (lowerQ.includes(preset.name.toLowerCase())) {
-        if (preset.name.toLowerCase() !== city.toLowerCase()) {
-          try {
-            const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${preset.latitude}&longitude=${preset.longitude}&hourly=pm10,pm2_5,us_aqi&timezone=auto&forecast_days=2`;
-            const res = await fetch(url);
-            if (res.ok) {
-              const raw = await res.json();
-              const parsed: ParsedAQIData = parseOpenMeteoAirQuality(raw, `${preset.name}, ${preset.admin1 || ""}`);
-              targetCity = `${preset.name} (${preset.admin1 || "India"})`;
-              targetCurrent = parsed.current;
-              targetForecast = parsed.forecast24h;
-            }
-          } catch (e) {
-            console.warn("Could not fetch target city data:", e);
+    const cityCandidate = extractCityCandidate(question);
+    if (cityCandidate) {
+      const location = await findCityLocation(cityCandidate);
+      if (location) {
+        try {
+          const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${location.latitude}&longitude=${location.longitude}&hourly=pm10,pm2_5,us_aqi&timezone=auto&forecast_days=2`;
+          const aqRes = await fetch(aqUrl);
+          if (aqRes.ok) {
+            const raw = await aqRes.json();
+            const parsed: ParsedAQIData = parseOpenMeteoAirQuality(raw, location.name);
+            targetCity = location.name;
+            targetCurrent = parsed.current;
+            targetForecast = parsed.forecast24h;
           }
-        }
-        break;
-      }
-    }
-
-    // If not a preset city, attempt to geocode if user wrote "in <place>" or "of <place>"
-    if (targetCity === city) {
-      const match = question.match(/(?:in|of|for|at)\s+([A-Za-z\s]+?)(?:\?|$|\.|\,)/i);
-      if (match && match[1]) {
-        const candidate = match[1].trim();
-        if (candidate.length > 2 && candidate.toLowerCase() !== city.toLowerCase()) {
-          try {
-            const geoRes = await fetch(
-              `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-                candidate
-              )}&count=1&language=en&format=json`
-            );
-            if (geoRes.ok) {
-              const geoData = await geoRes.json();
-              if (geoData.results && geoData.results[0]) {
-                const place = geoData.results[0];
-                const aqRes = await fetch(
-                  `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${place.latitude}&longitude=${place.longitude}&hourly=pm10,pm2_5,us_aqi&timezone=auto&forecast_days=2`
-                );
-                if (aqRes.ok) {
-                  const raw = await aqRes.json();
-                  const placeName = `${place.name}${place.admin1 ? ", " + place.admin1 : ""}`;
-                  const parsed: ParsedAQIData = parseOpenMeteoAirQuality(raw, placeName);
-                  targetCity = placeName;
-                  targetCurrent = parsed.current;
-                  targetForecast = parsed.forecast24h;
-                }
-              }
-            }
-          } catch (e) {
-            console.warn("Geocoding lookup failed:", e);
-          }
+        } catch (e) {
+          console.warn("Could not fetch air quality for target city:", e);
         }
       }
     }
