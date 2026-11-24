@@ -9,7 +9,7 @@ import {
   createFallbackAQIData,
 } from "@/lib/openmeteo";
 
-export default function AqifierApp() {
+export default function AQIferApp() {
   const [selectedCity, setSelectedCity] = useState<string>("Delhi");
   const [customPm, setCustomPm] = useState<number | null>(null);
   const [customInput, setCustomInput] = useState<string>("");
@@ -140,7 +140,7 @@ export default function AqifierApp() {
     const welcomeMsg: ChatMessage = {
       id: "welcome-msg",
       role: "assistant",
-      content: `Hello! I'm your Aqifier Outdoor Safety Assistant for ${
+      content: `Hello! I'm your AQIfer Outdoor Safety Assistant for ${
         customPm ? "your custom reading" : selectedCity
       }. Current AQI is ${currentPoint.us_aqi} (${cat.category}) with ${
         currentVisibility.km
@@ -299,7 +299,7 @@ export default function AqifierApp() {
       {/* 1. Header with Brand & Custom PM2.5 Checker */}
       <header className="top">
         <div className="brand">
-          Aqifier<small>Smog and outdoor safety</small>
+          AQIfer<small>Smog and outdoor safety</small>
         </div>
         <form
           className="custom"
@@ -546,7 +546,7 @@ export default function AqifierApp() {
             {/* Top Bar with Dropdown Toggle */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: "12px", marginBottom: "12px" }}>
               <div>
-                <strong style={{ fontSize: "16px", display: "block", color: "var(--ink)" }}>Aqifier Assistant</strong>
+                <strong style={{ fontSize: "16px", display: "block", color: "var(--ink)" }}>AQIfer Assistant</strong>
                 <span style={{ fontSize: "12px", color: "var(--mute)" }}>
                   {customPm ? "Custom PM2.5" : selectedCity} • Grounded in live AQI
                 </span>
@@ -835,7 +835,7 @@ export default function AqifierApp() {
                 >
                   <input
                     type="text"
-                    placeholder={`Ask Aqifier anything about ${
+                    placeholder={`Ask AQIfer anything about ${
                       customPm ? "your reading" : selectedCity
                     }...`}
                     value={chatInput}
