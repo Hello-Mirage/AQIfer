@@ -10,9 +10,13 @@ import {
 } from "@/lib/openmeteo";
 
 export default function AQIferApp() {
+  const [cityList, setCityList] = useState<CityLocation[]>(INDIAN_PRESET_CITIES);
+  const [currentLocation, setCurrentLocation] = useState<CityLocation>(INDIAN_PRESET_CITIES[0]);
   const [selectedCity, setSelectedCity] = useState<string>("Delhi");
-  const [customPm, setCustomPm] = useState<number | null>(null);
-  const [customInput, setCustomInput] = useState<string>("");
+  const [citySearchInput, setCitySearchInput] = useState<string>("");
+  const [isSearchingCity, setIsSearchingCity] = useState<boolean>(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
   const [aqiData, setAqiData] = useState<ParsedAQIData | null>(null);
   const [loadingAQI, setLoadingAQI] = useState<boolean>(true);
   const [selectedHourIdx, setSelectedHourIdx] = useState<number>(0);
@@ -38,23 +42,12 @@ export default function AQIferApp() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch AQI Data (Open-Meteo or Fallback)
-  const loadData = useCallback(async (cityName: string, custom?: number | null) => {
+  const loadData = useCallback(async (location: CityLocation) => {
     setLoadingAQI(true);
     try {
-      if (custom && custom > 0) {
-        const fallback = createFallbackAQIData(cityName, custom);
-        setAqiData(fallback);
-        setSelectedHourIdx(0);
-        return fallback;
-      }
-
-      const preset = INDIAN_PRESET_CITIES.find(
-        (c) => c.name.toLowerCase() === cityName.toLowerCase()
-      ) || INDIAN_PRESET_CITIES[0];
-
       const res = await fetch(
-        `/api/air-quality?lat=${preset.latitude}&lon=${preset.longitude}&city=${encodeURIComponent(
-          preset.name
+        `/api/air-quality?lat=${location.latitude}&lon=${location.longitude}&city=${encodeURIComponent(
+          location.name
         )}`
       );
       if (!res.ok) throw new Error("AQI fetch failed");
@@ -64,7 +57,7 @@ export default function AQIferApp() {
       return data;
     } catch (err) {
       console.warn("Using fallback AQI data:", err);
-      const fallback = createFallbackAQIData(cityName, custom || undefined);
+      const fallback = createFallbackAQIData(location.name);
       setAqiData(fallback);
       setSelectedHourIdx(0);
       return fallback;
@@ -100,9 +93,75 @@ export default function AQIferApp() {
     []
   );
 
+  // Select city from preset or search
+  const handleSelectLocation = useCallback(
+    (loc: CityLocation) => {
+      setCurrentLocation(loc);
+      setSelectedCity(loc.name);
+      setCitySearchInput("");
+      setSearchError(null);
+      if (!cityList.some((c) => c.name.toLowerCase() === loc.name.toLowerCase())) {
+        setCityList((prev) => [...prev, loc]);
+      }
+      loadData(loc).then((data) => {
+        if (data) generatePlan(data, familyProfile);
+      });
+    },
+    [cityList, loadData, generatePlan, familyProfile]
+  );
+
+  // City search form submit
+  const handleCitySearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const query = citySearchInput.trim();
+    if (!query) return;
+
+    setIsSearchingCity(true);
+    setSearchError(null);
+
+    // 1. Check if already in cityList / preset
+    const existing = cityList.find(
+      (c) =>
+        c.name.toLowerCase() === query.toLowerCase() ||
+        query.toLowerCase().includes(c.name.toLowerCase())
+    );
+    if (existing) {
+      handleSelectLocation(existing);
+      setIsSearchingCity(false);
+      return;
+    }
+
+    // 2. Fetch from geocoding API
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          const top = data.results[0];
+          const newLoc: CityLocation = {
+            name: top.name,
+            admin1: top.admin1 || "",
+            country: top.country || "",
+            latitude: top.latitude,
+            longitude: top.longitude,
+          };
+          handleSelectLocation(newLoc);
+          setIsSearchingCity(false);
+          return;
+        }
+      }
+      setSearchError("City not found");
+    } catch (err) {
+      console.error("Geocoding failed:", err);
+      setSearchError("Search error");
+    } finally {
+      setIsSearchingCity(false);
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
-    loadData(selectedCity, customPm).then((data) => {
+    loadData(currentLocation).then((data) => {
       if (mounted && data) {
         generatePlan(data, familyProfile);
       }
@@ -110,7 +169,7 @@ export default function AQIferApp() {
     return () => {
       mounted = false;
     };
-  }, [selectedCity, customPm, loadData, generatePlan]);
+  }, []);
 
   // Current Hour Point & Tint
   const currentPoint = useMemo(() => {
@@ -140,15 +199,13 @@ export default function AQIferApp() {
     const welcomeMsg: ChatMessage = {
       id: "welcome-msg",
       role: "assistant",
-      content: `Hello! I'm your AQIfer Outdoor Safety Assistant for ${
-        customPm ? "your custom reading" : selectedCity
-      }. Current AQI is ${currentPoint.us_aqi} (${cat.category}) with ${
+      content: `Hello! I'm your AQIfer Outdoor Safety Assistant for ${selectedCity}. Current AQI is ${currentPoint.us_aqi} (${cat.category}) with ${
         currentVisibility.km
       } km visibility. Ask me if it's safe to step out, drive, or send kids to school.`,
       timestamp: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
     };
     setMessages([welcomeMsg]);
-  }, [selectedCity, customPm]);
+  }, [selectedCity]);
 
   // 24-hour Safest Two-Hour Windows calculation
   const safeWindows = useMemo(() => {
@@ -226,7 +283,7 @@ export default function AQIferApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: text.trim(),
-          city: customPm ? "Custom reading" : selectedCity,
+          city: selectedCity,
           current: aqiData?.current,
           forecast24h: aqiData?.forecast24h || [],
           familyProfile,
@@ -296,68 +353,68 @@ export default function AQIferApp() {
 
   return (
     <div className="wrap">
-      {/* 1. Header with Brand & Custom PM2.5 Checker */}
+      {/* 1. Header with Brand & City Searcher / Selector */}
       <header className="top">
         <div className="brand">
           AQIfer<small>Smog and outdoor safety</small>
         </div>
         <form
           className="custom"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const val = parseFloat(customInput);
-            if (val > 0) {
-              setCustomPm(Math.min(val, 999));
-            }
-          }}
+          onSubmit={handleCitySearchSubmit}
         >
-          <span>Another city? Enter its PM2.5 reading</span>
+          <span>Search or select city</span>
           <input
-            id="cu"
-            type="number"
-            min="1"
-            max="999"
-            inputMode="decimal"
-            placeholder="µg/m³"
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            aria-label="PM2.5 in micrograms per cubic metre"
+            id="cityInput"
+            type="text"
+            list="popular-cities"
+            placeholder="e.g. Kozhikode, Haldia..."
+            value={citySearchInput}
+            onChange={(e) => {
+              setCitySearchInput(e.target.value);
+              setSearchError(null);
+            }}
+            aria-label="City search"
           />
-          <button className="chip" id="cuGo" type="submit">
-            Check
+          <datalist id="popular-cities">
+            {cityList.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.admin1 ? `${c.admin1}, ` : ""}{c.country || "India"}
+              </option>
+            ))}
+            <option value="Kozhikode" />
+            <option value="Chennai" />
+            <option value="Hyderabad" />
+            <option value="Patna" />
+            <option value="Lucknow" />
+            <option value="Pune" />
+            <option value="Ahmedabad" />
+            <option value="Jaipur" />
+            <option value="London" />
+            <option value="Tokyo" />
+            <option value="New York" />
+          </datalist>
+          <button className="chip" id="cuGo" type="submit" disabled={isSearchingCity}>
+            {isSearchingCity ? "Searching..." : "Check"}
           </button>
-          {customPm && (
-            <button
-              type="button"
-              className="chip"
-              onClick={() => {
-                setCustomPm(null);
-                setCustomInput("");
-                setSelectedCity("Delhi");
-              }}
-              style={{ fontSize: "12px", padding: "4px 10px" }}
-            >
-              Reset to Live
-            </button>
+          {searchError && (
+            <span style={{ color: "#d6403a", fontSize: "12px", fontWeight: 600 }}>
+              {searchError}
+            </span>
           )}
         </form>
       </header>
 
       {/* 2. City Preset Chips */}
       <div className="chips" role="group" aria-label="City">
-        {INDIAN_PRESET_CITIES.map((c) => {
-          const isPressed = !customPm && selectedCity === c.name;
+        {cityList.map((c) => {
+          const isPressed = selectedCity.toLowerCase() === c.name.toLowerCase();
           return (
             <button
               key={c.name}
               className="chip"
               type="button"
               aria-pressed={isPressed}
-              onClick={() => {
-                setCustomPm(null);
-                setCustomInput("");
-                setSelectedCity(c.name);
-              }}
+              onClick={() => handleSelectLocation(c)}
             >
               {c.name}
             </button>
@@ -374,7 +431,7 @@ export default function AQIferApp() {
             <div>
               <h1>{cat.headline}</h1>
               <p>
-                {customPm ? "Custom reading" : selectedCity}: fine soot (PM2.5) passes the upper
+                {selectedCity}: fine soot (PM2.5) passes the upper
                 airways and reaches deep into the lungs.{" "}
                 {currentPoint.us_aqi >= 201
                   ? "Today is a day to plan around the air, not ignore it."
@@ -548,7 +605,7 @@ export default function AQIferApp() {
               <div>
                 <strong style={{ fontSize: "16px", display: "block", color: "var(--ink)" }}>AQIfer Assistant</strong>
                 <span style={{ fontSize: "12px", color: "var(--mute)" }}>
-                  {customPm ? "Custom PM2.5" : selectedCity} • Grounded in live AQI
+                  {selectedCity} • Grounded in live AQI
                 </span>
               </div>
 
@@ -835,9 +892,7 @@ export default function AQIferApp() {
                 >
                   <input
                     type="text"
-                    placeholder={`Ask AQIfer anything about ${
-                      customPm ? "your reading" : selectedCity
-                    }...`}
+                    placeholder={`Ask AQIfer anything about ${selectedCity}...`}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     disabled={isAskingChat}
