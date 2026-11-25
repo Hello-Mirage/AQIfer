@@ -19,8 +19,15 @@ export default defineConfig({
         "src/app/api/**/*.ts",
         "src/components/**/*.tsx",
         "src/app/page.tsx",
+        "src/app/layout.tsx",
       ],
       exclude: ["**/*.test.ts", "**/*.test.tsx"],
+      thresholds: {
+        lines: 95,
+        statements: 94,
+        functions: 95,
+        branches: 85,
+      },
     },
   },
 });

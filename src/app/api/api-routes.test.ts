@@ -75,6 +75,17 @@ describe("API Edge Route Handlers", () => {
     expect(data.points).toHaveLength(9);
     expect(data.points[0].us_aqi).toBe(155);
 
+    const mockSingle = {
+      latitude: 28.6139,
+      longitude: 77.209,
+      current: { pm2_5: 42, us_aqi: 118 },
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(mockSingle), { status: 200 })
+    );
+    const singleRes = await getAqiGrid(req);
+    expect((await singleRes.json()).points).toHaveLength(1);
+
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("Err", { status: 503 }));
     const fbRes = await getAqiGrid(req);
@@ -274,6 +285,35 @@ describe("API Edge Route Handlers", () => {
     );
     expect(corridorRes.status).toBe(200);
     expect((await corridorRes.json()).routes).toHaveLength(1);
+
+    // Walk/Cycle uses cycling OSRM profile and single AQI object
+    const seenUrls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      seenUrls.push(url);
+      if (url.includes("nominatim.openstreetmap.org")) {
+        return new Response(
+          JSON.stringify([{ display_name: "Park, Delhi", lat: "28.61", lon: "77.21" }]),
+          { status: 200 }
+        );
+      }
+      if (url.includes("router.project-osrm.org")) {
+        return new Response(JSON.stringify({ routes: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ current: { pm2_5: 45, us_aqi: 120 } }), { status: 200 });
+    });
+    const walkRes = await postRouteSafety(
+      new NextRequest("http://localhost:3000/api/route-safety", {
+        method: "POST",
+        body: JSON.stringify({
+          origin: "Park",
+          destination: "Lake",
+          familyProfile: { members: [], commute: "Walk/Cycle", homeSetup: "Natural Ventilation" },
+        }),
+      })
+    );
+    expect(walkRes.status).toBe(200);
+    expect(seenUrls.some((u) => u.includes("/cycling/"))).toBe(true);
 
     // Malformed body hits outer 500 handler
     vi.spyOn(console, "error").mockImplementation(() => {});

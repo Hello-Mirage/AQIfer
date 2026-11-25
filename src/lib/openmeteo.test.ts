@@ -113,6 +113,10 @@ describe("Open-Meteo Air Quality parser and domain computations", () => {
 
     const custom = createFallbackAQIData("CustomCity", 210);
     expect(custom.current.pm2_5).toBeCloseTo(210, 0);
+
+    const unknown = createFallbackAQIData("UnknownTown");
+    expect(unknown.city).toBe("UnknownTown");
+    expect(unknown.forecast24h).toHaveLength(24);
   });
 
   it("identifies up to two separated safest daytime windows and detects Tomorrow spillover", () => {

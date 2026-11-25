@@ -71,6 +71,13 @@ describe("Gemini Smog Plan generator & model cascade", () => {
       homeSetup: "Air Purifier",
     });
     expect(carPlan.commuteSwap.recommendation.toLowerCase()).toContain("re-circulation");
+
+    const severePlan = generateHeuristicSmogPlan(
+      "Delhi",
+      [{ time: new Date().toISOString(), pm2_5: 190, pm10: 280, us_aqi: 250 }],
+      { members: ["Infants"], commute: "Car", homeSetup: "Natural Ventilation" }
+    );
+    expect(severePlan.safeWindows[0].riskLevel).toBe("Severe");
   });
 
   it("buildSmogPlanPrompt embeds city, profile, and forecast context", () => {
@@ -103,7 +110,8 @@ describe("Gemini Smog Plan generator & model cascade", () => {
   it("generateWithGeminiFallback cascades to fallback model and passes JSON schema when requested", async () => {
     const generateContent = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Primary overloaded"))
+      .mockResolvedValueOnce({ text: "" })
+      .mockRejectedValueOnce(new Error("Secondary overloaded"))
       .mockResolvedValueOnce({ text: '{"ok":true}' });
 
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -115,9 +123,9 @@ describe("Gemini Smog Plan generator & model cascade", () => {
     });
 
     expect(result).toBe('{"ok":true}');
-    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent).toHaveBeenCalledTimes(3);
     expect(generateContent.mock.calls[0][0].model).toBe(GEMINI_MODEL_CASCADE[0]);
-    expect(generateContent.mock.calls[1][0].model).toBe(GEMINI_MODEL_CASCADE[1]);
-    expect(generateContent.mock.calls[1][0].config.responseMimeType).toBe("application/json");
+    expect(generateContent.mock.calls[2][0].model).toBe(GEMINI_MODEL_CASCADE[2]);
+    expect(generateContent.mock.calls[2][0].config.responseMimeType).toBe("application/json");
   });
 });

@@ -286,6 +286,32 @@ describe("AQIfer UI Components", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Close & Return/i }));
     expect(onToggleDetailedPlan).toHaveBeenCalledWith(false);
+
+    // Natural Ventilation + Two-wheeler + School Kids with >= 150 AQI branch
+    rerender(
+      <AssistantPanel
+        selectedCity="Delhi"
+        isDetailedPlanOpen={true}
+        onToggleDetailedPlan={onToggleDetailedPlan}
+        safeWindows={[{ idx: 2, avgPm: 85, aqiVal: 165, label: "1 pm – 3 pm", day: "Today" }]}
+        smogPlan={null}
+        familyProfile={{
+          members: ["School Kids"],
+          commute: "Two-wheeler",
+          homeSetup: "Natural Ventilation",
+        }}
+        currentPoint={{ ...sampleForecast[0], us_aqi: 185 }}
+        messages={messages}
+        chatInput=""
+        isAskingChat={false}
+        chatContainerRef={ref}
+        onChatInputChange={onChatInputChange}
+        onSendMessage={onSendMessage}
+      />
+    );
+    expect(screen.getByText("Strict Midday-Only Natural Ventilation")).toBeInTheDocument();
+    expect(screen.getByText("Swap the bike or wear a sealed N95")).toBeInTheDocument();
+    expect(screen.getByText("School kids")).toBeInTheDocument();
   });
 
   it("RouteResultCard renders AVOID, CAUTION, and SAFE verdicts cleanly", () => {

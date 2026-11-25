@@ -27,6 +27,8 @@ describe("AQIferApp full-page integration", () => {
     const kolkataData = createFallbackAQIData("Kolkata", 95);
     const kozhikodeData = createFallbackAQIData("Kozhikode", 42);
 
+    Element.prototype.scrollTo = vi.fn();
+
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
 
@@ -114,17 +116,23 @@ describe("AQIferApp full-page integration", () => {
       await screen.findByText(/AQIfer Outdoor Safety Assistant for Kolkata/i)
     ).toBeInTheDocument();
 
-    // Toggle household profile and click Re-evaluate Report once plan settles
+    // Toggle household profile (adding Infants, removing School Kids) and click Re-evaluate Report
     fireEvent.click(screen.getByRole("button", { name: "Infants" }));
+    fireEvent.click(screen.getByRole("button", { name: "School kids" }));
     fireEvent.click(screen.getByRole("button", { name: "Car" }));
     fireEvent.click(screen.getByRole("button", { name: "Air purifier" }));
+    expect(screen.getByRole("button", { name: "School kids" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+
     const reevalBtn = await screen.findByRole("button", { name: "Re-evaluate Report" });
     expect(reevalBtn).toBeEnabled();
     fireEvent.click(reevalBtn);
 
     expect(await screen.findByText("Seal Gaps")).toBeInTheDocument();
 
-    // Send chat question via quick prompt (switches back from Detailed Plan to Chat)
+    // Send chat question and return from Detailed Plan
     fireEvent.click(screen.getByRole("button", { name: "Return to Chat" }));
     const chatInput = screen.getByPlaceholderText(/Ask AQIfer anything about Kolkata/i);
     fireEvent.change(chatInput, { target: { value: "When should I walk?" } });
@@ -133,12 +141,22 @@ describe("AQIferApp full-page integration", () => {
     expect(
       await screen.findByText("Midday hours between 1 pm and 3 pm are cleanest.")
     ).toBeInTheDocument();
+    expect(Element.prototype.scrollTo).toHaveBeenCalled();
 
-    // Search unknown city then valid city
+    // Search unknown city then valid city, and verify existing preset match short-circuits geocode
     const searchInput = screen.getByLabelText("City search");
+    fireEvent.change(searchInput, { target: { value: "   " } });
+    fireEvent.submit(searchInput.closest("form")!);
+
     fireEvent.change(searchInput, { target: { value: "AtlantisNowhere" } });
     fireEvent.submit(searchInput.closest("form")!);
     expect(await screen.findByText("City not found")).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: "delhi" } });
+    fireEvent.submit(searchInput.closest("form")!);
+    expect(
+      await screen.findByText(/AQIfer Outdoor Safety Assistant for Delhi/i)
+    ).toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: "Kozhikode" } });
     fireEvent.submit(searchInput.closest("form")!);
@@ -147,5 +165,31 @@ describe("AQIferApp full-page integration", () => {
     });
 
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("recovers gracefully when upstream APIs fail or reject on mount, search, and chat", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Offline"));
+
+    render(<AQIferApp />);
+
+    // Falls back cleanly using local diurnal model even when /api/air-quality and /api/ai-plan fail
+    expect(await screen.findByText(/AQIfer Outdoor Safety Assistant for Delhi/i)).toBeInTheDocument();
+
+    // Geocode rejection renders Search error
+    const searchInput = screen.getByLabelText("City search");
+    fireEvent.change(searchInput, { target: { value: "Patna" } });
+    fireEvent.submit(searchInput.closest("form")!);
+    expect(await screen.findByText("Search error")).toBeInTheDocument();
+
+    // Chat rejection displays friendly network error message
+    const chatInput = screen.getByPlaceholderText(/Ask AQIfer anything about Delhi/i);
+    fireEvent.change(chatInput, { target: { value: "Safe outside?" } });
+    fireEvent.submit(chatInput.closest("form")!);
+    expect(
+      await screen.findByText("Network issue. Please check the Safest Windows or try again.")
+    ).toBeInTheDocument();
   });
 });
