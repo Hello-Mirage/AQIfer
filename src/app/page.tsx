@@ -8,7 +8,10 @@ import {
   getAQICategory,
   estimateVisibilityFromPM25,
   createFallbackAQIData,
+  computeSafestWindows,
 } from "@/lib/openmeteo";
+import { formatChatTimestamp, formatHourLabel } from "@/lib/format";
+import CitySearchHeader from "@/components/CitySearchHeader";
 import ForecastChart from "@/components/ForecastChart";
 import HouseholdProfilePanel from "@/components/HouseholdProfilePanel";
 import AssistantPanel from "@/components/AssistantPanel";
@@ -16,34 +19,9 @@ import AssistantPanel from "@/components/AssistantPanel";
 const AirQualityMap = dynamic(() => import("@/components/AirQualityMap"), {
   ssr: false,
   loading: () => (
-    <div
-      className="panel"
-      style={{
-        height: "420px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "var(--mute)",
-      }}
-    >
-      Loading OpenStreetMap air quality view...
-    </div>
+    <div className="panel map-loading-fallback">Loading OpenStreetMap air quality view...</div>
   ),
 });
-
-const POPULAR_CITY_OPTIONS = [
-  "Kozhikode",
-  "Chennai",
-  "Hyderabad",
-  "Patna",
-  "Lucknow",
-  "Pune",
-  "Ahmedabad",
-  "Jaipur",
-  "London",
-  "Tokyo",
-  "New York",
-];
 
 /**
  * Main AQIfer application page combining live AQI telemetry, 24-hour forecast,
@@ -58,7 +36,6 @@ export default function AQIferApp() {
   const [searchError, setSearchError] = useState<string | null>(null);
 
   const [aqiData, setAqiData] = useState<ParsedAQIData | null>(null);
-  const [loadingAQI, setLoadingAQI] = useState<boolean>(true);
   const [selectedHourIdx, setSelectedHourIdx] = useState<number>(0);
 
   const [familyProfile, setFamilyProfile] = useState<FamilyProfile>({
@@ -77,7 +54,6 @@ export default function AQIferApp() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async (location: CityLocation) => {
-    setLoadingAQI(true);
     try {
       const res = await fetch(
         `/api/air-quality?lat=${location.latitude}&lon=${location.longitude}&city=${encodeURIComponent(
@@ -95,8 +71,6 @@ export default function AQIferApp() {
       setAqiData(fallback);
       setSelectedHourIdx(0);
       return fallback;
-    } finally {
-      setLoadingAQI(false);
     }
   }, []);
 
@@ -186,20 +160,23 @@ export default function AQIferApp() {
     }
   };
 
+  const initialLocationRef = useRef(currentLocation);
+  const initialProfileRef = useRef(familyProfile);
+
   useEffect(() => {
     let mounted = true;
-    loadData(currentLocation).then((data) => {
+    loadData(initialLocationRef.current).then((data) => {
       if (mounted && data) {
-        generatePlan(data, familyProfile);
+        generatePlan(data, initialProfileRef.current);
       }
     });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [loadData, generatePlan]);
 
   const currentPoint = useMemo(() => {
-    if (!aqiData || !aqiData.forecast24h || aqiData.forecast24h.length === 0) {
+    if (!aqiData?.forecast24h?.length) {
       return { pm2_5: 172, pm10: 275, us_aqi: 222, time: new Date().toISOString() };
     }
     return aqiData.forecast24h[selectedHourIdx] || aqiData.current;
@@ -217,48 +194,33 @@ export default function AQIferApp() {
     }
   }, [cat.color]);
 
+  const latestMetricsRef = useRef({
+    usAqi: currentPoint.us_aqi,
+    category: cat.category,
+    visibilityKm: currentVisibility.km,
+  });
+  latestMetricsRef.current = {
+    usAqi: currentPoint.us_aqi,
+    category: cat.category,
+    visibilityKm: currentVisibility.km,
+  };
+
   useEffect(() => {
+    const { usAqi, category, visibilityKm } = latestMetricsRef.current;
     setMessages([
       {
         id: "welcome-msg",
         role: "assistant",
-        content: `Hello! I'm your AQIfer Outdoor Safety Assistant for ${selectedCity}. Current AQI is ${currentPoint.us_aqi} (${cat.category}) with ${currentVisibility.km} km visibility. Ask me if it's safe to step out, drive, or send kids to school.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        content: `Hello! I'm your AQIfer Outdoor Safety Assistant for ${selectedCity}. Current AQI is ${usAqi} (${category}) with ${visibilityKm} km visibility. Ask me if it's safe to step out, drive, or send kids to school.`,
+        timestamp: formatChatTimestamp(),
       },
     ]);
   }, [selectedCity]);
 
-  const safeWindows = useMemo(() => {
-    if (!aqiData || !aqiData.forecast24h || aqiData.forecast24h.length < 2) return [];
-    const candidates: { idx: number; avgPm: number; aqiVal: number; label: string; day: string }[] = [];
-    const nowHour = new Date().getHours();
-
-    for (let i = 0; i < aqiData.forecast24h.length - 1; i++) {
-      const p1 = aqiData.forecast24h[i];
-      const p2 = aqiData.forecast24h[i + 1];
-      const hour = new Date(p1.time).getHours();
-      if (hour >= 6 && hour <= 20) {
-        const avg = (p1.pm2_5 + p2.pm2_5) / 2;
-        const h1 = hour % 12 || 12;
-        const h2 = (hour + 2) % 12 || 12;
-        candidates.push({
-          idx: i,
-          avgPm: Math.round(avg * 10) / 10,
-          aqiVal: Math.round(Math.max(p1.us_aqi, p2.us_aqi)),
-          label: `${h1} ${hour < 12 ? "am" : "pm"} – ${h2} ${(hour + 2) % 24 < 12 ? "am" : "pm"}`,
-          day: nowHour + i >= 24 ? "Tomorrow" : "Today",
-        });
-      }
-    }
-
-    candidates.sort((a, b) => a.avgPm - b.avgPm);
-    const chosen: typeof candidates = [];
-    for (const c of candidates) {
-      if (chosen.every((o) => Math.abs(o.idx - c.idx) >= 3)) chosen.push(c);
-      if (chosen.length === 2) break;
-    }
-    return chosen;
-  }, [aqiData]);
+  const safeWindows = useMemo(
+    () => computeSafestWindows(aqiData?.forecast24h || []),
+    [aqiData]
+  );
 
   const bestWindowIndices = useMemo(() => {
     const set = new Set<number>();
@@ -270,24 +232,19 @@ export default function AQIferApp() {
   }, [safeWindows]);
 
   const maxForecastPm = useMemo(() => {
-    if (!aqiData || !aqiData.forecast24h) return 300;
+    if (!aqiData?.forecast24h) return 300;
     return Math.max(...aqiData.forecast24h.map((p) => p.pm2_5), 100);
   }, [aqiData]);
 
   const handleSendMessage = async (textToSend?: string) => {
-    const text = textToSend || chatInput;
-    if (!text.trim() || isAskingChat) return;
+    const text = (textToSend || chatInput).trim();
+    if (!text || isAskingChat) return;
 
     setIsDetailedPlanOpen(false);
-
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: text.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [
+      ...prev,
+      { id: `u-${Date.now()}`, role: "user", content: text, timestamp: formatChatTimestamp() },
+    ]);
     setChatInput("");
     setIsAskingChat(true);
 
@@ -296,7 +253,7 @@ export default function AQIferApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: text.trim(),
+          question: text,
           city: selectedCity,
           current: aqiData?.current,
           forecast24h: aqiData?.forecast24h || [],
@@ -310,7 +267,7 @@ export default function AQIferApp() {
           id: `b-${Date.now()}`,
           role: "assistant",
           content: data.answer || "Unable to retrieve advice right now.",
-          timestamp: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+          timestamp: formatChatTimestamp(),
         },
       ]);
     } catch (err) {
@@ -321,7 +278,7 @@ export default function AQIferApp() {
           id: `err-${Date.now()}`,
           role: "assistant",
           content: "Network issue. Please check the Safest Windows or try again.",
-          timestamp: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+          timestamp: formatChatTimestamp(),
         },
       ]);
     } finally {
@@ -338,26 +295,17 @@ export default function AQIferApp() {
     }
   }, [messages, isAskingChat, isDetailedPlanOpen]);
 
-  const toggleMember = (m: string) => {
-    const exists = familyProfile.members.includes(m);
-    const updated = exists
-      ? familyProfile.members.filter((x) => x !== m)
-      : [...familyProfile.members, m];
-    const newProfile = { ...familyProfile, members: updated };
-    setFamilyProfile(newProfile);
-    if (aqiData) generatePlan(aqiData, newProfile);
+  const updateProfileAndPlan = (updatedProfile: FamilyProfile) => {
+    setFamilyProfile(updatedProfile);
+    if (aqiData) generatePlan(aqiData, updatedProfile);
   };
 
-  const handleCommuteChange = (com: FamilyProfile["commute"]) => {
-    const newProfile = { ...familyProfile, commute: com };
-    setFamilyProfile(newProfile);
-    if (aqiData) generatePlan(aqiData, newProfile);
-  };
-
-  const handleHomeChange = (home: FamilyProfile["homeSetup"]) => {
-    const newProfile = { ...familyProfile, homeSetup: home };
-    setFamilyProfile(newProfile);
-    if (aqiData) generatePlan(aqiData, newProfile);
+  const toggleMember = (member: string) => {
+    const exists = familyProfile.members.includes(member);
+    const members = exists
+      ? familyProfile.members.filter((x) => x !== member)
+      : [...familyProfile.members, member];
+    updateProfileAndPlan({ ...familyProfile, members });
   };
 
   const handleReevaluateReport = async () => {
@@ -366,67 +314,33 @@ export default function AQIferApp() {
     setIsDetailedPlanOpen(true);
   };
 
-  const activeHourTimeLabel = useMemo(() => {
-    const d = new Date(currentPoint.time);
-    const h = d.getHours();
-    return `${h % 12 || 12} ${h < 12 ? "am" : "pm"}`;
-  }, [currentPoint.time]);
+  const activeHourTimeLabel = useMemo(
+    () => formatHourLabel(currentPoint.time),
+    [currentPoint.time]
+  );
+
+  const heroGuidance =
+    currentPoint.us_aqi >= 201
+      ? "Today is a day to plan around the air, not ignore it."
+      : currentPoint.us_aqi >= 101
+      ? "Children, older adults and anyone with asthma should take it easy."
+      : "Normal activity is fine.";
 
   return (
     <div className="wrap">
-      <header className="top">
-        <div className="brand">
-          AQIfer<small>Smog and outdoor safety</small>
-        </div>
-        <form className="custom" onSubmit={handleCitySearchSubmit}>
-          <span>Search or select city</span>
-          <input
-            id="cityInput"
-            type="text"
-            list="popular-cities"
-            placeholder="e.g. Kozhikode, Haldia..."
-            value={citySearchInput}
-            onChange={(e) => {
-              setCitySearchInput(e.target.value);
-              setSearchError(null);
-            }}
-            aria-label="City search"
-          />
-          <datalist id="popular-cities">
-            {cityList.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.admin1 ? `${c.admin1}, ` : ""}
-                {c.country || "India"}
-              </option>
-            ))}
-            {POPULAR_CITY_OPTIONS.map((city) => (
-              <option key={city} value={city} />
-            ))}
-          </datalist>
-          <button className="chip" id="cuGo" type="submit" disabled={isSearchingCity}>
-            {isSearchingCity ? "Searching..." : "Check"}
-          </button>
-          {searchError && (
-            <span style={{ color: "#d6403a", fontSize: "12px", fontWeight: 600 }}>
-              {searchError}
-            </span>
-          )}
-        </form>
-      </header>
-
-      <div className="chips" role="group" aria-label="City">
-        {cityList.map((c) => (
-          <button
-            key={c.name}
-            className="chip"
-            type="button"
-            aria-pressed={selectedCity.toLowerCase() === c.name.toLowerCase()}
-            onClick={() => handleSelectLocation(c)}
-          >
-            {c.name}
-          </button>
-        ))}
-      </div>
+      <CitySearchHeader
+        cityList={cityList}
+        selectedCity={selectedCity}
+        citySearchInput={citySearchInput}
+        isSearchingCity={isSearchingCity}
+        searchError={searchError}
+        onSearchInputChange={(val) => {
+          setCitySearchInput(val);
+          setSearchError(null);
+        }}
+        onSearchSubmit={handleCitySearchSubmit}
+        onSelectLocation={handleSelectLocation}
+      />
 
       <div className="main-screen-grid">
         <div className="left-dashboard">
@@ -435,12 +349,7 @@ export default function AQIferApp() {
               <h1>{cat.headline}</h1>
               <p>
                 {selectedCity}: fine soot (PM2.5) passes the upper airways and reaches deep into the
-                lungs.{" "}
-                {currentPoint.us_aqi >= 201
-                  ? "Today is a day to plan around the air, not ignore it."
-                  : currentPoint.us_aqi >= 101
-                  ? "Children, older adults and anyone with asthma should take it easy."
-                  : "Normal activity is fine."}
+                lungs. {heroGuidance}
               </p>
             </div>
 
@@ -504,8 +413,10 @@ export default function AQIferApp() {
             loadingPlan={loadingPlan}
             hasAqiData={Boolean(aqiData)}
             onToggleMember={toggleMember}
-            onChangeCommute={handleCommuteChange}
-            onChangeHomeSetup={handleHomeChange}
+            onChangeCommute={(commute) => updateProfileAndPlan({ ...familyProfile, commute })}
+            onChangeHomeSetup={(homeSetup) =>
+              updateProfileAndPlan({ ...familyProfile, homeSetup })
+            }
             onReevaluate={handleReevaluateReport}
           />
 

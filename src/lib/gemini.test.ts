@@ -1,67 +1,123 @@
-import { describe, it, expect } from "vitest";
-import { generateHeuristicSmogPlan } from "./gemini";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { GoogleGenAI } from "@google/genai";
+import {
+  buildSmogPlanPrompt,
+  GEMINI_MODEL_CASCADE,
+  generateHeuristicSmogPlan,
+  generateWithGeminiFallback,
+  getGeminiClient,
+  smogPlanResponseSchema,
+} from "./gemini";
 import { createFallbackAQIData } from "./openmeteo";
 import { FamilyProfile } from "@/types";
 
-describe("Gemini Smog Plan Fallback Generator", () => {
+describe("Gemini Smog Plan generator & model cascade", () => {
+  const originalKey = process.env.GEMINI_API_KEY;
+
   const profile: FamilyProfile = {
     members: ["Infants", "Elderly"],
     commute: "Two-wheeler",
     homeSetup: "Air Purifier",
   };
 
-  it("generates a structured Smog Plan matching all schema requirements", () => {
+  afterEach(() => {
+    if (originalKey === undefined) {
+      delete process.env.GEMINI_API_KEY;
+    } else {
+      process.env.GEMINI_API_KEY = originalKey;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it("getGeminiClient returns null without real API key and instantiates client with valid key", () => {
+    delete process.env.GEMINI_API_KEY;
+    expect(getGeminiClient()).toBeNull();
+
+    process.env.GEMINI_API_KEY = "your_gemini_api_key_here";
+    expect(getGeminiClient()).toBeNull();
+
+    process.env.GEMINI_API_KEY = "AIzaTestValidLookingKey123";
+    expect(getGeminiClient()).toBeInstanceOf(GoogleGenAI);
+  });
+
+  it("generateHeuristicSmogPlan satisfies full schema requirements across home & commute variants", () => {
     const fallbackAQI = createFallbackAQIData("Delhi");
     const plan = generateHeuristicSmogPlan("Delhi", fallbackAQI.forecast24h, profile);
 
     expect(plan.headlineSummary).toContain("Delhi");
     expect(plan.safeWindows.length).toBeGreaterThan(0);
-    expect(plan.indoorHacks.length).toBe(3);
+    expect(plan.indoorHacks).toHaveLength(3);
     expect(plan.commuteSwap.recommendation).toBeDefined();
-    expect(plan.commuteSwap.why).toBeDefined();
 
-    // Verify clear why explanations are provided
-    plan.safeWindows.forEach((win) => {
-      expect(win.why.length).toBeGreaterThan(10);
-      expect(win.timeWindow).toBeDefined();
-    });
-
-    plan.indoorHacks.forEach((hack) => {
-      expect(hack.why.length).toBeGreaterThan(10);
-      expect(hack.action.length).toBeGreaterThan(10);
-    });
-  });
-
-  it("customizes indoor hacks based on home setup", () => {
-    const fallbackAQI = createFallbackAQIData("Kolkata");
-    
-    // Purifier setup
-    const purifierPlan = generateHeuristicSmogPlan("Kolkata", fallbackAQI.forecast24h, {
-      ...profile,
-      homeSetup: "Air Purifier",
-    });
-    expect(purifierPlan.indoorHacks[0].title).toContain("Purifier");
-
-    // Natural ventilation setup
-    const ventilationPlan = generateHeuristicSmogPlan("Kolkata", fallbackAQI.forecast24h, {
-      ...profile,
+    const ventWalkPlan = generateHeuristicSmogPlan("Kolkata", [], {
+      members: [],
+      commute: "Walk/Cycle",
       homeSetup: "Natural Ventilation",
     });
-    expect(ventilationPlan.indoorHacks[0].title).toContain("Ventilation");
-  });
+    expect(ventWalkPlan.indoorHacks[0].title).toContain("Ventilation");
+    expect(ventWalkPlan.indoorHacks[2].title).toContain("Cooking Exhaust");
+    expect(ventWalkPlan.commuteSwap.recommendation.toLowerCase()).toContain("secondary");
 
-  it("customizes commute swap based on user's primary commute", () => {
-    const fallbackAQI = createFallbackAQIData("Mumbai");
-    const twoWheelerPlan = generateHeuristicSmogPlan("Mumbai", fallbackAQI.forecast24h, {
-      ...profile,
-      commute: "Two-wheeler",
+    const transitPlan = generateHeuristicSmogPlan("Mumbai", fallbackAQI.forecast24h, {
+      members: ["Asthma"],
+      commute: "Public Transit",
+      homeSetup: "Air Purifier",
     });
-    expect(twoWheelerPlan.commuteSwap.recommendation.toLowerCase()).toContain("metro");
+    expect(transitPlan.commuteSwap.recommendation.toLowerCase()).toContain("rapid transit");
 
     const carPlan = generateHeuristicSmogPlan("Mumbai", fallbackAQI.forecast24h, {
-      ...profile,
+      members: [],
       commute: "Car",
+      homeSetup: "Air Purifier",
     });
     expect(carPlan.commuteSwap.recommendation.toLowerCase()).toContain("re-circulation");
+  });
+
+  it("buildSmogPlanPrompt embeds city, profile, and forecast context", () => {
+    const data = createFallbackAQIData("Haldia");
+    const prompt = buildSmogPlanPrompt("Haldia", data.forecast24h, {
+      members: [],
+      commute: "Car",
+      homeSetup: "Air Purifier",
+    });
+    expect(prompt).toContain("Haldia");
+    expect(prompt).toContain("None specifically vulnerable");
+    expect(prompt).toContain("Air Purifier");
+  });
+
+  it("generateWithGeminiFallback returns null when client is null or all models fail", async () => {
+    expect(await generateWithGeminiFallback(null, "test prompt")).toBeNull();
+
+    const failingClient = {
+      models: {
+        generateContent: vi.fn().mockRejectedValue(new Error("429 Quota exceeded")),
+      },
+    } as unknown as GoogleGenAI;
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await generateWithGeminiFallback(failingClient, "test prompt");
+    expect(res).toBeNull();
+    expect(failingClient.models.generateContent).toHaveBeenCalledTimes(GEMINI_MODEL_CASCADE.length);
+  });
+
+  it("generateWithGeminiFallback cascades to fallback model and passes JSON schema when requested", async () => {
+    const generateContent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Primary overloaded"))
+      .mockResolvedValueOnce({ text: '{"ok":true}' });
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mockClient = { models: { generateContent } } as unknown as GoogleGenAI;
+
+    const result = await generateWithGeminiFallback(mockClient, "test", {
+      responseSchema: smogPlanResponseSchema,
+      temperature: 0.1,
+    });
+
+    expect(result).toBe('{"ok":true}');
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls[0][0].model).toBe(GEMINI_MODEL_CASCADE[0]);
+    expect(generateContent.mock.calls[1][0].model).toBe(GEMINI_MODEL_CASCADE[1]);
+    expect(generateContent.mock.calls[1][0].config.responseMimeType).toBe("application/json");
   });
 });

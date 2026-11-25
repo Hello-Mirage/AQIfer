@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { getAQICategory } from "@/lib/openmeteo";
+import { AQI_BANDS, getAQICategory } from "@/lib/openmeteo";
+import { formatHourLabel } from "@/lib/format";
 import { HourlyAQIPoint } from "@/types";
 
 interface ForecastChartProps {
@@ -31,31 +32,17 @@ export default function ForecastChart({
       </p>
 
       <div className="legend">
-        <span>
-          <i style={{ background: "#2f9e63" }} /> 0–50 Good
-        </span>
-        <span>
-          <i style={{ background: "#c99700" }} /> 51–100 Moderate
-        </span>
-        <span>
-          <i style={{ background: "#e07b1f" }} /> 101–150 Sensitive
-        </span>
-        <span>
-          <i style={{ background: "#d6403a" }} /> 151–200 Unhealthy
-        </span>
-        <span>
-          <i style={{ background: "#8a3fb0" }} /> 201–300 Very Unhealthy
-        </span>
-        <span>
-          <i style={{ background: "#7a1e3a" }} /> 301+ Hazardous
-        </span>
+        {AQI_BANDS.map((band) => (
+          <span key={band.category}>
+            <i style={{ background: band.color }} /> {band.rangeLabel} {band.shortName}
+          </span>
+        ))}
       </div>
 
       <div className="scroller">
         <div className="bars">
           {forecast24h.map((point, idx) => {
-            const h = new Date(point.time).getHours();
-            const timeLabel = (h % 12 || 12) + (h < 12 ? " am" : " pm");
+            const timeLabel = formatHourLabel(point.time);
             const pointCat = getAQICategory(point.us_aqi);
             const isBest = bestWindowIndices.has(idx);
             const isSelected = selectedHourIdx === idx;
