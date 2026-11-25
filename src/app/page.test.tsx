@@ -98,8 +98,11 @@ describe("AQIferApp full-page integration", () => {
 
     render(<AQIferApp />);
 
-    // Initial Delhi mount
+    // Initial Delhi mount & accessibility landmarks
     expect(await screen.findByText(/AQIfer Outdoor Safety Assistant for Delhi/i)).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: "Conversation messages" })).toBeInTheDocument();
     expect(screen.getByTestId("mock-map")).toHaveTextContent("Map: Delhi");
 
     // Select an hour bar in ForecastChart

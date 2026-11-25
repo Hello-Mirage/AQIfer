@@ -56,6 +56,7 @@ export default function AssistantPanel({
 
           <button
             type="button"
+            aria-expanded={isDetailedPlanOpen}
             className={`assistant-toggle-btn${isDetailedPlanOpen ? " active" : ""}`}
             onClick={() => onToggleDetailedPlan(!isDetailedPlanOpen)}
           >
@@ -73,7 +74,7 @@ export default function AssistantPanel({
           />
         ) : (
           <div className="chat-view">
-            <div className="quick-prompts-row">
+            <div className="quick-prompts-row" role="group" aria-label="Quick safety questions">
               {QUICK_PROMPTS.map((qp) => (
                 <button
                   key={qp.label}
@@ -86,7 +87,13 @@ export default function AssistantPanel({
               ))}
             </div>
 
-            <div ref={chatContainerRef} className="chat-messages-scroll">
+            <div
+              ref={chatContainerRef}
+              className="chat-messages-scroll"
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation messages"
+            >
               {messages.map((m) => (
                 <div
                   key={m.id}
@@ -115,6 +122,7 @@ export default function AssistantPanel({
             >
               <input
                 type="text"
+                aria-label={`Ask AQIfer about ${selectedCity}`}
                 placeholder={`Ask AQIfer anything about ${selectedCity}...`}
                 value={chatInput}
                 onChange={(e) => onChatInputChange(e.target.value)}

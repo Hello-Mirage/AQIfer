@@ -40,7 +40,7 @@ export default function ForecastChart({
       </div>
 
       <div className="scroller">
-        <div className="bars">
+        <div className="bars" role="group" aria-label="24-hour PM2.5 forecast">
           {forecast24h.map((point, idx) => {
             const timeLabel = formatHourLabel(point.time);
             const pointCat = getAQICategory(point.us_aqi);
@@ -53,6 +53,9 @@ export default function ForecastChart({
                 key={`${point.time}-${idx}`}
                 className={`bar${isBest ? " best" : ""}`}
                 aria-pressed={isSelected}
+                aria-label={`${timeLabel}: PM2.5 ${point.pm2_5} µg/m³, US AQI ${point.us_aqi}${
+                  isBest ? ", safest window" : ""
+                }`}
                 style={{ "--c": pointCat.color } as React.CSSProperties}
                 title={`${timeLabel}: PM2.5 ${point.pm2_5}, AQI ${point.us_aqi}`}
                 type="button"

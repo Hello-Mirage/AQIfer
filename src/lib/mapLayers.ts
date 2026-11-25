@@ -5,7 +5,7 @@ import { AQIGridPoint, RouteSafetyResult } from "@/types";
 function createPinIcon(letter: string, bg: string): L.DivIcon {
   return L.divIcon({
     className: "route-pin",
-    html: `<div style="background:${bg};color:#fff;font-weight:800;font-size:12px;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);">${escapeHtml(letter)}</div>`,
+    html: `<div style="background:${escapeHtml(bg)};color:#fff;font-weight:800;font-size:12px;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.4);">${escapeHtml(letter)}</div>`,
     iconSize: [26, 26],
     iconAnchor: [13, 13],
   });
@@ -25,6 +25,7 @@ export function renderAqiGridOverlay(
   gridPoints.forEach((pt) => {
     const safeLabel = escapeHtml(pt.label || cityName);
     const safeCategory = escapeHtml(pt.category);
+    const safeColor = escapeHtml(pt.color);
 
     L.circle([pt.latitude, pt.longitude], {
       radius: 2600,
@@ -37,7 +38,7 @@ export function renderAqiGridOverlay(
       .bindPopup(
         `<div style="font-family:sans-serif;color:#111;">
           <strong>${safeLabel || safeCity}</strong><br/>
-          US AQI: <b style="color:${pt.color}">${pt.us_aqi}</b> (${safeCategory})<br/>
+          US AQI: <b style="color:${safeColor}">${pt.us_aqi}</b> (${safeCategory})<br/>
           PM2.5: <b>${pt.pm2_5} µg/m³</b>
         </div>`
       )
@@ -45,7 +46,7 @@ export function renderAqiGridOverlay(
 
     const badgeIcon = L.divIcon({
       className: "aqi-map-badge",
-      html: `<div style="background:${pt.color};color:#fff;font-weight:700;font-size:11px;padding:2px 7px;border-radius:999px;border:1.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);white-space:nowrap;text-align:center;">${pt.us_aqi}</div>`,
+      html: `<div style="background:${safeColor};color:#fff;font-weight:700;font-size:11px;padding:2px 7px;border-radius:999px;border:1.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.35);white-space:nowrap;text-align:center;">${pt.us_aqi}</div>`,
       iconSize: [38, 22],
       iconAnchor: [19, 11],
     });

@@ -16,6 +16,7 @@ export default defineConfig({
       reporter: ["text", "json-summary"],
       include: [
         "src/lib/**/*.ts",
+        "src/hooks/**/*.ts",
         "src/app/api/**/*.ts",
         "src/components/**/*.tsx",
         "src/app/page.tsx",

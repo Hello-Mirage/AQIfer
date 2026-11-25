@@ -74,7 +74,7 @@ describe("AQIfer UI Components", () => {
     );
 
     expect(screen.getByText("AQIfer")).toBeInTheDocument();
-    expect(screen.getByText("City not found")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("City not found");
 
     fireEvent.change(screen.getByLabelText("City search"), { target: { value: "Chennai" } });
     expect(onSearchInputChange).toHaveBeenCalledWith("Chennai");
@@ -258,7 +258,9 @@ describe("AQIfer UI Components", () => {
     fireEvent.click(screen.getByRole("button", { name: /Visibility for driving/i }));
     expect(onSendMessage).toHaveBeenCalledWith("How bad is the visibility for driving right now?");
 
-    fireEvent.click(screen.getByRole("button", { name: /Detailed Plan/i }));
+    const detailedBtn = screen.getByRole("button", { name: /Detailed Plan/i });
+    expect(detailedBtn).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(detailedBtn);
     expect(onToggleDetailedPlan).toHaveBeenCalledWith(true);
 
     // Fallback DetailedSmogPlanView when smogPlan is null and safeWindows is empty

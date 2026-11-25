@@ -73,7 +73,11 @@ export default function CitySearchHeader({
           <button className="chip" id="cuGo" type="submit" disabled={isSearchingCity}>
             {isSearchingCity ? "Searching..." : "Check"}
           </button>
-          {searchError && <span className="search-error">{searchError}</span>}
+          {searchError && (
+            <span className="search-error" role="alert">
+              {searchError}
+            </span>
+          )}
         </form>
       </header>
 

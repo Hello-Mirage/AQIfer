@@ -4,64 +4,41 @@
 
 ---
 
-## Architecture & Speed Optimization
+## Architecture & Highlights
 
-### 1. Instant Initial Page Load Shell
-- **Modular Client Architecture**: `src/app/page.tsx` orchestrates modular, single-responsibility UI panels (`CitySearchHeader`, `ForecastChart`, `HouseholdProfilePanel`, `AirQualityMap`, and `AssistantPanel`).
-- Raw layout renders immediately while live telemetry, spatial map grids, and AI plans stream reactively with resilient client/server fallbacks.
+### 1. Modular Client Architecture & Accessibility
+- **Clean Declarative Composition**: [page.tsx](src/app/page.tsx) composes [useAirQualityDashboard](src/hooks/useAirQualityDashboard.ts) with focused UI panels (`CitySearchHeader`, `HeroSummaryGrid`, `ForecastChart`, `HouseholdProfilePanel`, `AirQualityMap`, and `AssistantPanel`).
+- **Accessible Landmarks & Screen Reader Support**: Uses `<main>`, `<footer>`, `role="log"` with `aria-live="polite"` for chat updates, `role="alert"` for search/route errors, `aria-expanded` toggles, and explicit descriptive `aria-label` strings on inputs, map regions, and 24-hour bar controls.
 
-### 2. Next.js Edge Runtime (`export const runtime = 'edge'`)
-Backend API routes run on the Next.js Edge Runtime:
-- `/api/air-quality`: Proxies and normalizes Open-Meteo 48h air quality telemetry into a 24-hour forecast of PM2.5, PM10, visibility, and US AQI with deterministic diurnal fallback.
-- `/api/aqi-grid`: Computes a 3x3 color-coded spatial AQI zone grid around any city coordinates for OpenStreetMap overlays.
-- `/api/geocode`: Low-latency global city search autocomplete via Open-Meteo Geocoding API.
+### 2. Next.js Edge Runtime & Security Hardening
+All backend API routes run on the Next.js Edge Runtime with `AbortController` timeouts, input validation (`parseCoordinates`, `normalizeFamilyProfile`), XSS HTML escaping in Leaflet popups (`escapeHtml`), and security HTTP headers in `next.config.mjs`:
+- `/api/air-quality`: Proxies and normalizes Open-Meteo 48h telemetry into a 24-hour forecast of PM2.5, PM10, visibility, and US AQI with deterministic diurnal fallback.
+- `/api/aqi-grid`: Computes a 3x3 color-coded spatial AQI zone grid around city coordinates for OpenStreetMap overlays.
+- `/api/geocode`: Global city search autocomplete via Open-Meteo Geocoding API.
 - `/api/ai-plan`: Structured Gemini Flash cascade (`2.5-flash` -> `2.0-flash` -> `1.5-flash`) with response schema enforcement and epidemiological fallback.
 - `/api/chat`: Grounded follow-up Q&A assistant consulting the 24-hour hourly forecast and live city overrides.
-- `/api/route-safety`: Geocodes journey endpoints via Nominatim/Open-Meteo, fetches candidate road/cycle corridors from OSRM, evaluates waypoint AQI along every route, and recommends the cleanest corridor.
+- `/api/route-safety`: Geocodes journey endpoints via Nominatim/Open-Meteo, evaluates candidate OSRM corridors against waypoint AQI, and recommends the cleanest corridor.
 
 ---
 
 ## Core Features
 
-1. **Any-City Search + Live AQI Data**:
-   - Quick-select presets for Indian smog hotspots (**Delhi**, **Kolkata**, **Haldia**, **Mumbai**, **Bengaluru**) plus global search autocomplete.
-   - Live metrics (US AQI, PM2.5, PM10, Visibility) and interactive 24-hour color-coded bar chart highlighting the two cleanest 2-hour daytime windows.
-2. **Household Sensitivity Profile & Re-evaluate Report**:
-   - Configure vulnerable household members (Infants, School Kids, Elderly, Asthma), primary commute mode, and home filtration setup, with instant re-evaluation.
-3. **Interactive OpenStreetMap Air Quality Map & Journey Planner**:
-   - Displays color-coded US EPA AQI zones over OpenStreetMap tiles.
-   - Evaluates origin-to-destination journeys (`SAFE`, `CAUTION`, `AVOID`) and highlights cleaner alternative corridors.
-4. **AQIfer Assistant & Detailed Smog Plan**:
-   - Interactive chat grounded in live city forecast numbers plus a toggleable detailed action plan.
-5. **Zero-Crash Graceful Degradation**:
-   - Every external API call uses explicit timeouts and grounded local fallbacks when upstream APIs or Gemini keys are unavailable.
+1. **Any-City Search + Live AQI Data**: Quick-select Indian hotspot presets (**Delhi**, **Kolkata**, **Haldia**, **Mumbai**, **Bengaluru**) plus global search autocomplete and interactive 24-hour color-coded bars highlighting the two safest daytime windows.
+2. **Household Profile & Re-evaluate Report**: Configure vulnerable household members, commute mode, and indoor filtration, with one-click AI report re-evaluation.
+3. **Interactive OpenStreetMap AQI Map & Journey Planner**: Color-coded EPA AQI zones with route exposure verdicts (`SAFE`, `CAUTION`, `AVOID`) and cleaner corridor suggestions.
+4. **Resilient Graceful Degradation**: Works end-to-end even when external APIs or Gemini keys are unavailable.
 
 ---
 
-## Local Setup & Development
+## Automated Verification & CI
 
-### 1. Prerequisites
-- Node.js (v18+ or v20+)
-- `pnpm` (or `npm`)
+The repository enforces linting, strict TypeScript checking, Vitest coverage thresholds (`95%+` lines/functions), and production builds locally and in GitHub Actions (`.github/workflows/ci.yml`):
 
-### 2. Installation
-```bash
-pnpm install
-```
-
-### 3. Environment Variables
-Create a `.env.local` file in the root directory:
-```bash
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-*(If no API key is provided, the application runs cleanly in epidemiological fallback mode).*
-
-### 4. Commands
 ```bash
 pnpm dev            # Run local development server
 pnpm lint           # Run ESLint across Next.js codebase
 pnpm typecheck      # Run strict TypeScript compiler checks
-pnpm test           # Run Vitest unit, API, and component test suite
-pnpm test:coverage  # Run tests with V8 coverage report
+pnpm test           # Run 54 Vitest unit, API, hook, and UI tests
+pnpm test:coverage  # Run tests with V8 coverage thresholds
 pnpm build          # Create production Next.js build
 ```

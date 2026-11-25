@@ -204,7 +204,12 @@ export default function AirQualityMap({ location, familyProfile }: AirQualityMap
         </div>
       )}
 
-      <div ref={mapContainerRef} className="map-canvas" />
+      <div
+        ref={mapContainerRef}
+        className="map-canvas"
+        role="region"
+        aria-label={`Interactive OpenStreetMap air quality map for ${location.name}`}
+      />
 
       <div className="legend map-legend-row">
         {AQI_BANDS.map((band) => (

@@ -151,6 +151,9 @@ describe("AirQualityMap component", () => {
     const { rerender } = render(<AirQualityMap location={delhi} familyProfile={profile} />);
 
     expect(screen.getByText(/Live Air Quality Map/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Interactive OpenStreetMap air quality map for Delhi" })
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("lat=28.6139"));
     });
