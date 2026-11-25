@@ -7,7 +7,7 @@ import {
 } from "@/lib/chat";
 import { generateWithGeminiFallback, getGeminiClient } from "@/lib/gemini";
 import { DEFAULT_FAMILY_PROFILE } from "@/lib/format";
-import { getErrorMessage } from "@/lib/http";
+import { getErrorMessage, normalizeFamilyProfile } from "@/lib/http";
 import { CurrentAQI, FamilyProfile, HourlyAQIPoint } from "@/types";
 
 export const runtime = "edge";
@@ -25,18 +25,23 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as {
-      question?: string;
-      city?: string;
+      question?: unknown;
+      city?: unknown;
       current?: CurrentAQI;
-      forecast24h?: HourlyAQIPoint[];
-      familyProfile?: FamilyProfile;
+      forecast24h?: unknown;
+      familyProfile?: unknown;
     };
 
-    question = body.question || "";
-    targetCity = body.city || targetCity;
+    question = typeof body.question === "string" ? body.question.slice(0, 1000) : "";
+    targetCity =
+      typeof body.city === "string" && body.city.trim()
+        ? body.city.trim().slice(0, 120)
+        : targetCity;
     targetCurrent = body.current;
-    let targetForecast: HourlyAQIPoint[] = body.forecast24h || [];
-    familyProfile = body.familyProfile || familyProfile;
+    let targetForecast: HourlyAQIPoint[] = Array.isArray(body.forecast24h)
+      ? (body.forecast24h as HourlyAQIPoint[])
+      : [];
+    familyProfile = normalizeFamilyProfile(body.familyProfile);
 
     if (!question.trim()) {
       return NextResponse.json({

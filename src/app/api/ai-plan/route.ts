@@ -7,7 +7,7 @@ import {
   smogPlanResponseSchema,
 } from "@/lib/gemini";
 import { DEFAULT_FAMILY_PROFILE } from "@/lib/format";
-import { getErrorMessage } from "@/lib/http";
+import { getErrorMessage, normalizeFamilyProfile } from "@/lib/http";
 import { AISmogPlan, FamilyProfile, HourlyAQIPoint } from "@/types";
 
 export const runtime = "edge";
@@ -20,13 +20,13 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = (await req.json()) as {
-      city?: string;
-      forecast24h?: HourlyAQIPoint[];
-      familyProfile?: FamilyProfile;
+      city?: unknown;
+      forecast24h?: unknown;
+      familyProfile?: unknown;
     };
-    city = body.city || city;
-    forecast24h = body.forecast24h || [];
-    familyProfile = body.familyProfile || familyProfile;
+    city = typeof body.city === "string" && body.city.trim() ? body.city.trim().slice(0, 120) : city;
+    forecast24h = Array.isArray(body.forecast24h) ? (body.forecast24h as HourlyAQIPoint[]) : [];
+    familyProfile = normalizeFamilyProfile(body.familyProfile);
 
     const gemini = getGeminiClient();
     if (!gemini) {

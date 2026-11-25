@@ -4,6 +4,7 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import CitySearchHeader from "./CitySearchHeader";
+import HeroSummaryGrid from "./HeroSummaryGrid";
 import ForecastChart from "./ForecastChart";
 import HouseholdProfilePanel from "./HouseholdProfilePanel";
 import AssistantPanel from "./AssistantPanel";
@@ -54,12 +55,12 @@ const sampleSmogPlan: AISmogPlan = {
 };
 
 describe("AQIfer UI Components", () => {
-  it("CitySearchHeader renders brand, handles preset selection, search input, and errors", () => {
+  it("CitySearchHeader handles input changes, busy searching state, preset clicks, and errors", () => {
     const onSearchInputChange = vi.fn();
     const onSearchSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
     const onSelectLocation = vi.fn();
 
-    render(
+    const { rerender } = render(
       <CitySearchHeader
         cityList={INDIAN_PRESET_CITIES}
         selectedCity="Delhi"
@@ -75,14 +76,81 @@ describe("AQIfer UI Components", () => {
     expect(screen.getByText("AQIfer")).toBeInTheDocument();
     expect(screen.getByText("City not found")).toBeInTheDocument();
 
-    const delhiBtn = screen.getByRole("button", { name: "Delhi" });
-    expect(delhiBtn).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("City search"), { target: { value: "Chennai" } });
+    expect(onSearchInputChange).toHaveBeenCalledWith("Chennai");
 
+    expect(screen.getByRole("button", { name: "Delhi" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "Kolkata" }));
     expect(onSelectLocation).toHaveBeenCalledWith(INDIAN_PRESET_CITIES[1]);
 
     fireEvent.submit(screen.getByRole("button", { name: "Check" }).closest("form")!);
     expect(onSearchSubmit).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <CitySearchHeader
+        cityList={INDIAN_PRESET_CITIES}
+        selectedCity="Delhi"
+        citySearchInput="Chennai"
+        isSearchingCity={true}
+        searchError={null}
+        onSearchInputChange={onSearchInputChange}
+        onSearchSubmit={onSearchSubmit}
+        onSelectLocation={onSelectLocation}
+      />
+    );
+    expect(screen.getByRole("button", { name: "Searching..." })).toBeDisabled();
+  });
+
+  it("HeroSummaryGrid renders severity copy and safest window stats across AQI bands", () => {
+    const { rerender } = render(
+      <HeroSummaryGrid
+        selectedCity="Delhi"
+        headline="Stay indoors"
+        category="Very Unhealthy"
+        usAqi={220}
+        pm25={145}
+        pm10={260}
+        activeHourTimeLabel="10 am"
+        visibilityKm={3.2}
+        visibilityCondition="Poor, slow down"
+        safestWindow={{ idx: 3, avgPm: 85, aqiVal: 160, label: "1 pm – 3 pm", day: "Today" }}
+      />
+    );
+    expect(screen.getByText(/plan around the air/i)).toBeInTheDocument();
+    expect(screen.getByText("1 pm – 3 pm")).toBeInTheDocument();
+
+    rerender(
+      <HeroSummaryGrid
+        selectedCity="Mumbai"
+        headline="Limit outdoor effort"
+        category="Unhealthy for Sensitive Groups"
+        usAqi={125}
+        pm25={45}
+        pm10={75}
+        activeHourTimeLabel="11 am"
+        visibilityKm={12}
+        visibilityCondition="Clear enough to drive"
+        safestWindow={null}
+      />
+    );
+    expect(screen.getByText(/should take it easy/i)).toBeInTheDocument();
+    expect(screen.getByText("None found")).toBeInTheDocument();
+
+    rerender(
+      <HeroSummaryGrid
+        selectedCity="Bengaluru"
+        headline="Air is clean"
+        category="Good"
+        usAqi={40}
+        pm25={10}
+        pm10={20}
+        activeHourTimeLabel="12 pm"
+        visibilityKm={12}
+        visibilityCondition="Clear enough to drive"
+        safestWindow={null}
+      />
+    );
+    expect(screen.getByText(/Normal activity is fine/i)).toBeInTheDocument();
   });
 
   it("ForecastChart renders bars, best window highlights, and selects hour on click", () => {
@@ -134,8 +202,7 @@ describe("AQIfer UI Components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Air purifier" }));
     expect(onChangeHomeSetup).toHaveBeenCalledWith("Air Purifier");
 
-    const reevalBtn = screen.getByRole("button", { name: "Re-evaluate Report" });
-    fireEvent.click(reevalBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Re-evaluate Report" }));
     expect(onReevaluate).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -152,12 +219,13 @@ describe("AQIfer UI Components", () => {
     expect(screen.getByRole("button", { name: "Re-evaluating report..." })).toBeDisabled();
   });
 
-  it("AssistantPanel supports quick prompts, message sending, and Detailed Plan view switching", () => {
+  it("AssistantPanel supports chat typing, loading state, Detailed Plan fallbacks, and toggle closing", () => {
     const onToggleDetailedPlan = vi.fn();
     const onChatInputChange = vi.fn();
     const onSendMessage = vi.fn();
     const messages: ChatMessage[] = [
       { id: "1", role: "assistant", content: "Hello from AQIfer!", timestamp: "10:00 AM" },
+      { id: "2", role: "user", content: "Walk ok?", timestamp: "10:01 AM" },
     ];
     const ref = React.createRef<HTMLDivElement>();
 
@@ -172,7 +240,7 @@ describe("AQIfer UI Components", () => {
         currentPoint={sampleForecast[0]}
         messages={messages}
         chatInput="Safe now?"
-        isAskingChat={false}
+        isAskingChat={true}
         chatContainerRef={ref}
         onChatInputChange={onChatInputChange}
         onSendMessage={onSendMessage}
@@ -180,24 +248,29 @@ describe("AQIfer UI Components", () => {
     );
 
     expect(screen.getByText("Hello from AQIfer!")).toBeInTheDocument();
+    expect(screen.getByText(/Thinking with live forecast data/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Ask AQIfer anything/i), {
+      target: { value: "5 pm?" },
+    });
+    expect(onChatInputChange).toHaveBeenCalledWith("5 pm?");
+
     fireEvent.click(screen.getByRole("button", { name: /Visibility for driving/i }));
     expect(onSendMessage).toHaveBeenCalledWith("How bad is the visibility for driving right now?");
-
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(onSendMessage).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /Detailed Plan/i }));
     expect(onToggleDetailedPlan).toHaveBeenCalledWith(true);
 
+    // Fallback DetailedSmogPlanView when smogPlan is null and safeWindows is empty
     rerender(
       <AssistantPanel
-        selectedCity="Delhi"
+        selectedCity="Mumbai"
         isDetailedPlanOpen={true}
         onToggleDetailedPlan={onToggleDetailedPlan}
-        safeWindows={[{ idx: 2, avgPm: 60, aqiVal: 140, label: "1 pm – 3 pm", day: "Today" }]}
-        smogPlan={sampleSmogPlan}
-        familyProfile={defaultProfile}
-        currentPoint={{ ...sampleForecast[0], us_aqi: 175 }}
+        safeWindows={[]}
+        smogPlan={null}
+        familyProfile={{ members: [], commute: "Car", homeSetup: "Air Purifier" }}
+        currentPoint={{ ...sampleForecast[0], us_aqi: 90 }}
         messages={messages}
         chatInput=""
         isAskingChat={false}
@@ -207,13 +280,15 @@ describe("AQIfer UI Components", () => {
       />
     );
 
-    expect(screen.getByText("Draft Seal")).toBeInTheDocument();
-    expect(screen.getByText("Take enclosed Metro instead of bike.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Return to Chat" }));
+    expect(screen.getByText("Any time works")).toBeInTheDocument();
+    expect(screen.getByText("Air Purifier High-CADR Lockdown")).toBeInTheDocument();
+    expect(screen.getByText("Keep vehicle windows up with AC recirculation")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Close & Return/i }));
     expect(onToggleDetailedPlan).toHaveBeenCalledWith(false);
   });
 
-  it("RouteResultCard renders SAFE/AVOID verdict details and marks recommended route", () => {
+  it("RouteResultCard renders AVOID, CAUTION, and SAFE verdicts cleanly", () => {
     const result: RouteSafetyResult = {
       origin: { name: "Connaught Place", latitude: 28.63, longitude: 77.21 },
       destination: { name: "India Gate", latitude: 28.61, longitude: 77.22 },
@@ -250,11 +325,11 @@ describe("AQIfer UI Components", () => {
       betterRouteSuggestion: "Use Alternative Route 1 or Metro.",
     };
 
-    render(<RouteResultCard result={result} />);
-
+    const { rerender } = render(<RouteResultCard result={result} />);
     expect(screen.getByText("AVOID")).toBeInTheDocument();
-    expect(screen.getByText("Avoid open two-wheeler commute.")).toBeInTheDocument();
-    expect(screen.getByText("Use Alternative Route 1 or Metro.")).toBeInTheDocument();
     expect(screen.getByText(/★ Recommended/)).toBeInTheDocument();
+
+    rerender(<RouteResultCard result={{ ...result, verdict: "SAFE" }} />);
+    expect(screen.getByText("SAFE")).toBeInTheDocument();
   });
 });

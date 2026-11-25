@@ -53,6 +53,14 @@ const delhi: CityLocation = {
   longitude: 77.209,
 };
 
+const kolkata: CityLocation = {
+  name: "Kolkata",
+  admin1: "West Bengal",
+  country: "India",
+  latitude: 22.5726,
+  longitude: 88.3639,
+};
+
 const profile: FamilyProfile = {
   members: ["School Kids"],
   commute: "Two-wheeler",
@@ -60,7 +68,7 @@ const profile: FamilyProfile = {
 };
 
 describe("AirQualityMap component", () => {
-  it("loads AQI grid zones, evaluates sample route, and handles API errors", async () => {
+  it("loads AQI grid, evaluates multi-route journeys, updates on city switch, and handles errors", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url.includes("/api/aqi-grid")) {
@@ -99,24 +107,40 @@ describe("AirQualityMap component", () => {
                   [28.63, 77.21],
                   [28.61, 77.22],
                 ],
+                waypoints: [],
+                color: "#d6403a",
+              },
+              {
+                index: 1,
+                label: "Alternative Route 1",
+                distanceKm: 4.4,
+                durationMin: 13,
+                avgAqi: 130,
+                maxAqi: 140,
+                avgPm25: 62,
+                coordinates: [
+                  [28.63, 77.21],
+                  [28.62, 77.225],
+                  [28.61, 77.22],
+                ],
                 waypoints: [
                   {
                     latitude: 28.62,
-                    longitude: 77.215,
-                    us_aqi: 182,
-                    pm2_5: 92,
-                    category: "Unhealthy",
-                    color: "#d6403a",
+                    longitude: 77.225,
+                    us_aqi: 130,
+                    pm2_5: 62,
+                    category: "Unhealthy for Sensitive Groups",
+                    color: "#e07b1f",
                   },
                 ],
-                color: "#d6403a",
+                color: "#e07b1f",
               },
             ],
-            recommendedRouteIndex: 0,
+            recommendedRouteIndex: 1,
             verdict: "AVOID",
             verdictHeadline: "Avoid open two-wheeler travel.",
             analysis: "High particulate matter detected.",
-            betterRouteSuggestion: "Take enclosed Metro.",
+            betterRouteSuggestion: "Take Alternative Route 1.",
           }),
           { status: 200 }
         );
@@ -124,29 +148,39 @@ describe("AirQualityMap component", () => {
       return new Response("{}", { status: 404 });
     });
 
-    render(<AirQualityMap location={delhi} familyProfile={profile} />);
+    const { rerender } = render(<AirQualityMap location={delhi} familyProfile={profile} />);
 
     expect(screen.getByText(/Live Air Quality Map/i)).toBeInTheDocument();
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("/api/aqi-grid"));
+      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("lat=28.6139"));
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Try sample route" }));
-
     expect(await screen.findByText("Avoid open two-wheeler travel.")).toBeInTheDocument();
-    expect(screen.getByText("Take enclosed Metro.")).toBeInTheDocument();
+    expect(screen.getByText("Take Alternative Route 1.")).toBeInTheDocument();
 
+    // City switch triggers re-fetch for new location
+    rerender(<AirQualityMap location={kolkata} familyProfile={profile} />);
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining("lat=22.5726"));
+    });
+
+    // API error shows alert banner
     fetchSpy.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "Could not find destination" }), { status: 404 })
     );
     fireEvent.change(screen.getByLabelText("Journey start location"), {
-      target: { value: "Point A" },
+      target: { value: "Howrah" },
     });
     fireEvent.change(screen.getByLabelText("Journey destination"), {
       target: { value: "UnknownDest" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Check Route Safety" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not find destination");
 
-    expect(await screen.findByText("Could not find destination")).toBeInTheDocument();
+    // Network rejection shows fallback error message
+    fetchSpy.mockRejectedValueOnce(new Error("Offline"));
+    fireEvent.click(screen.getByRole("button", { name: "Check Route Safety" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Network error checking route safety/i);
   });
 });

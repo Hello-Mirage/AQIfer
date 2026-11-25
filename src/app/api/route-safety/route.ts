@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateWithGeminiFallback, getGeminiClient } from "@/lib/gemini";
-import { DEFAULT_FAMILY_PROFILE } from "@/lib/format";
-import { fetchJsonWithTimeout, getErrorMessage } from "@/lib/http";
+import { fetchJsonWithTimeout, getErrorMessage, normalizeFamilyProfile } from "@/lib/http";
 import { geocodePlace } from "@/lib/location";
 import { OpenMeteoGridRawItem } from "@/lib/openmeteo";
 import {
@@ -14,7 +13,6 @@ import {
   prepareRouteSamples,
   routeVerdictSchema,
 } from "@/lib/routeSafety";
-import { FamilyProfile } from "@/types";
 
 export const runtime = "edge";
 
@@ -28,16 +26,17 @@ interface OsrmRouteResponse {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
-      origin?: string;
-      destination?: string;
-      city?: string;
-      familyProfile?: FamilyProfile;
+      origin?: unknown;
+      destination?: unknown;
+      city?: unknown;
+      familyProfile?: unknown;
     };
 
-    const originText = (body.origin || "").trim();
-    const destText = (body.destination || "").trim();
-    const cityContext = body.city || "";
-    const familyProfile: FamilyProfile = body.familyProfile || DEFAULT_FAMILY_PROFILE;
+    const originText = typeof body.origin === "string" ? body.origin.trim().slice(0, 180) : "";
+    const destText =
+      typeof body.destination === "string" ? body.destination.trim().slice(0, 180) : "";
+    const cityContext = typeof body.city === "string" ? body.city.trim().slice(0, 120) : "";
+    const familyProfile = normalizeFamilyProfile(body.familyProfile);
 
     if (!originText || !destText) {
       return NextResponse.json(

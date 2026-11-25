@@ -10,12 +10,12 @@ const config: Config = {
     extend: {
       colors: {
         aqi: {
-          good: "#10b981",
-          moderate: "#f59e0b",
-          unhealthySensitive: "#f97316",
-          unhealthy: "#ef4444",
-          veryUnhealthy: "#8b5cf6",
-          hazardous: "#7f1d1d",
+          good: "#2f9e63",
+          moderate: "#c99700",
+          unhealthySensitive: "#e07b1f",
+          unhealthy: "#d6403a",
+          veryUnhealthy: "#8a3fb0",
+          hazardous: "#7a1e3a",
         },
       },
     },

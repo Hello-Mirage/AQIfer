@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fetchJsonWithTimeout, getErrorMessage, escapeHtml } from "./http";
+import {
+  escapeHtml,
+  fetchJsonWithTimeout,
+  getErrorMessage,
+  normalizeFamilyProfile,
+  parseCoordinates,
+} from "./http";
 import { formatChatTimestamp, formatHourLabel, formatHourRange } from "./format";
 
-describe("HTTP & formatting utilities", () => {
+describe("HTTP, validation & formatting utilities", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -31,6 +37,46 @@ describe("HTTP & formatting utilities", () => {
     await expect(
       fetchJsonWithTimeout("https://example.com/slow", { timeoutMs: 15 })
     ).rejects.toThrow("Aborted");
+  });
+
+  it("parseCoordinates validates numeric geographic ranges and uses defaults when omitted", () => {
+    expect(parseCoordinates(new URLSearchParams(""), 28.6, 77.2)).toEqual({
+      latitude: 28.6,
+      longitude: 77.2,
+    });
+    expect(parseCoordinates(new URLSearchParams("lat=22.5&lon=88.3"), 28.6, 77.2)).toEqual({
+      latitude: 22.5,
+      longitude: 88.3,
+    });
+    expect(parseCoordinates(new URLSearchParams("lat=abc&lon=77.2"), 28.6, 77.2)).toBeNull();
+    expect(parseCoordinates(new URLSearchParams("lat=95&lon=77.2"), 28.6, 77.2)).toBeNull();
+    expect(parseCoordinates(new URLSearchParams("lat=28&lon=-200"), 28.6, 77.2)).toBeNull();
+  });
+
+  it("normalizeFamilyProfile sanitizes malformed inputs into safe defaults", () => {
+    expect(normalizeFamilyProfile(null).commute).toBe("Two-wheeler");
+    expect(
+      normalizeFamilyProfile({
+        members: ["Infants", 123, "Elderly"],
+        commute: "Spaceship",
+        homeSetup: "OpenDoor",
+      })
+    ).toEqual({
+      members: ["Infants", "Elderly"],
+      commute: "Two-wheeler",
+      homeSetup: "Natural Ventilation",
+    });
+    expect(
+      normalizeFamilyProfile({
+        members: ["Asthma"],
+        commute: "Car",
+        homeSetup: "Air Purifier",
+      })
+    ).toEqual({
+      members: ["Asthma"],
+      commute: "Car",
+      homeSetup: "Air Purifier",
+    });
   });
 
   it("getErrorMessage extracts messages from Error instances and primitive values", () => {

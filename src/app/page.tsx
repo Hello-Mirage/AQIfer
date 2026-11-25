@@ -12,6 +12,7 @@ import {
 } from "@/lib/openmeteo";
 import { formatChatTimestamp, formatHourLabel } from "@/lib/format";
 import CitySearchHeader from "@/components/CitySearchHeader";
+import HeroSummaryGrid from "@/components/HeroSummaryGrid";
 import ForecastChart from "@/components/ForecastChart";
 import HouseholdProfilePanel from "@/components/HouseholdProfilePanel";
 import AssistantPanel from "@/components/AssistantPanel";
@@ -287,7 +288,7 @@ export default function AQIferApp() {
   };
 
   useEffect(() => {
-    if (!isDetailedPlanOpen && chatContainerRef.current) {
+    if (!isDetailedPlanOpen && chatContainerRef.current?.scrollTo) {
       chatContainerRef.current.scrollTo({
         top: chatContainerRef.current.scrollHeight,
         behavior: "smooth",
@@ -319,13 +320,6 @@ export default function AQIferApp() {
     [currentPoint.time]
   );
 
-  const heroGuidance =
-    currentPoint.us_aqi >= 201
-      ? "Today is a day to plan around the air, not ignore it."
-      : currentPoint.us_aqi >= 101
-      ? "Children, older adults and anyone with asthma should take it easy."
-      : "Normal activity is fine.";
-
   return (
     <div className="wrap">
       <CitySearchHeader
@@ -344,61 +338,18 @@ export default function AQIferApp() {
 
       <div className="main-screen-grid">
         <div className="left-dashboard">
-          <section className="hero" aria-live="polite">
-            <div>
-              <h1>{cat.headline}</h1>
-              <p>
-                {selectedCity}: fine soot (PM2.5) passes the upper airways and reaches deep into the
-                lungs. {heroGuidance}
-              </p>
-            </div>
-
-            <div className="dial">
-              <b>{currentPoint.us_aqi}</b>
-              <span>{cat.category}</span>
-              <i>US AQI, reading for {activeHourTimeLabel}</i>
-            </div>
-          </section>
-
-          <div className="stats">
-            <div>
-              <small>PM2.5</small>
-              <b>
-                {currentPoint.pm2_5}
-                <em>µg/m³</em>
-              </b>
-              <br />
-              <span>Fine soot</span>
-            </div>
-            <div>
-              <small>PM10</small>
-              <b>
-                {currentPoint.pm10}
-                <em>µg/m³</em>
-              </b>
-              <br />
-              <span>Dust and ash</span>
-            </div>
-            <div>
-              <small>Visibility</small>
-              <b>
-                {currentVisibility.km}
-                <em>km</em>
-              </b>
-              <br />
-              <span>{currentVisibility.condition}</span>
-            </div>
-            <div>
-              <small>Safest window</small>
-              <b>{safeWindows.length > 0 ? safeWindows[0].label : "–"}</b>
-              <br />
-              <span>
-                {safeWindows.length > 0
-                  ? `${safeWindows[0].day}, about ${safeWindows[0].avgPm} µg/m³`
-                  : "None found"}
-              </span>
-            </div>
-          </div>
+          <HeroSummaryGrid
+            selectedCity={selectedCity}
+            headline={cat.headline}
+            category={cat.category}
+            usAqi={currentPoint.us_aqi}
+            pm25={currentPoint.pm2_5}
+            pm10={currentPoint.pm10}
+            activeHourTimeLabel={activeHourTimeLabel}
+            visibilityKm={currentVisibility.km}
+            visibilityCondition={currentVisibility.condition}
+            safestWindow={safeWindows[0] || null}
+          />
 
           <ForecastChart
             forecast24h={aqiData?.forecast24h || []}

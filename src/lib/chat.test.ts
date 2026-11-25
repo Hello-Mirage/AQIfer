@@ -29,41 +29,44 @@ describe("Chat heuristics and city air-quality resolution", () => {
   });
 
   it("handles AQI questions across very unhealthy, moderate/sensitive, and clean bands", () => {
-    const high = generateSmartHeuristicAnswer(
-      "What is the AQI?",
-      "Delhi",
-      220,
-      150,
-      2.5,
-      "Very Unhealthy",
-      sampleCurrent,
-      baseProfile
-    );
-    expect(high).toContain("very unhealthy");
+    expect(
+      generateSmartHeuristicAnswer(
+        "What is the AQI?",
+        "Delhi",
+        220,
+        150,
+        2.5,
+        "Very Unhealthy",
+        sampleCurrent,
+        baseProfile
+      )
+    ).toContain("very unhealthy");
 
-    const mid = generateSmartHeuristicAnswer(
-      "air quality check",
-      "Kolkata",
-      140,
-      55,
-      7.2,
-      "Unhealthy for Sensitive Groups",
-      undefined,
-      baseProfile
-    );
-    expect(mid).toContain("N95 mask");
+    expect(
+      generateSmartHeuristicAnswer(
+        "air quality check",
+        "Kolkata",
+        140,
+        55,
+        7.2,
+        "Unhealthy for Sensitive Groups",
+        undefined,
+        baseProfile
+      )
+    ).toContain("N95 mask");
 
-    const low = generateSmartHeuristicAnswer(
-      "How is pollution?",
-      "Bengaluru",
-      42,
-      11,
-      12,
-      "Good",
-      undefined,
-      baseProfile
-    );
-    expect(low).toContain("acceptable range");
+    expect(
+      generateSmartHeuristicAnswer(
+        "How is pollution?",
+        "Bengaluru",
+        42,
+        11,
+        12,
+        "Good",
+        undefined,
+        baseProfile
+      )
+    ).toContain("acceptable range");
   });
 
   it("handles driving/visibility, walk/outdoor safety, 5 pm kids, and general queries", () => {
@@ -80,17 +83,18 @@ describe("Chat heuristics and city air-quality resolution", () => {
     expect(drive).toContain("3.2 km");
     expect(drive).toContain("Poor, slow down");
 
-    const safeWalk = generateSmartHeuristicAnswer(
-      "Can I go for a walk outside?",
-      "Bengaluru",
-      60,
-      18,
-      12,
-      "Moderate",
-      undefined,
-      baseProfile
-    );
-    expect(safeWalk).toContain("Yes, right now air quality in Bengaluru is acceptable");
+    expect(
+      generateSmartHeuristicAnswer(
+        "Can I go for a walk outside?",
+        "Bengaluru",
+        60,
+        18,
+        12,
+        "Moderate",
+        undefined,
+        baseProfile
+      )
+    ).toContain("Yes, right now air quality in Bengaluru is acceptable");
 
     const unsafeWalk = generateSmartHeuristicAnswer(
       "Is it safe to walk outside?",
@@ -105,29 +109,31 @@ describe("Chat heuristics and city air-quality resolution", () => {
     expect(unsafeWalk).toContain("NOT recommended");
     expect(unsafeWalk).toContain("If anyone must go out");
 
-    const evening = generateSmartHeuristicAnswer(
-      "What about 5 pm for kids?",
-      "Delhi",
-      215,
-      140,
-      3.2,
-      "Very Unhealthy",
-      sampleCurrent,
-      baseProfile
-    );
-    expect(evening).toContain("NOT safe for children");
+    expect(
+      generateSmartHeuristicAnswer(
+        "What about 5 pm for kids?",
+        "Delhi",
+        215,
+        140,
+        3.2,
+        "Very Unhealthy",
+        sampleCurrent,
+        baseProfile
+      )
+    ).toContain("NOT safe for children");
 
-    const generic = generateSmartHeuristicAnswer(
-      "Should I buy houseplants?",
-      "Delhi",
-      215,
-      140,
-      3.2,
-      "Very Unhealthy",
-      sampleCurrent,
-      baseProfile
-    );
-    expect(generic).toContain("Limit outdoor exertion");
+    expect(
+      generateSmartHeuristicAnswer(
+        "Should I buy houseplants?",
+        "Delhi",
+        215,
+        140,
+        3.2,
+        "Very Unhealthy",
+        sampleCurrent,
+        baseProfile
+      )
+    ).toContain("Limit outdoor exertion");
   });
 
   it("builds structured chat prompt with forecast summary", () => {
@@ -148,7 +154,7 @@ describe("Chat heuristics and city air-quality resolution", () => {
     expect(prompt).toContain("Vis ~2km");
   });
 
-  it("resolveTargetCityAirQuality retains fallback city on activity question and overrides on city question", async () => {
+  it("resolveTargetCityAirQuality handles no city, unresolvable city, upstream failure, and live city switch", async () => {
     const unchanged = await resolveTargetCityAirQuality(
       "How bad is driving right now?",
       "Delhi",
@@ -156,6 +162,25 @@ describe("Chat heuristics and city air-quality resolution", () => {
       []
     );
     expect(unchanged.city).toBe("Delhi");
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    const missingLoc = await resolveTargetCityAirQuality(
+      "What is AQI in LostAtlantis?",
+      "Delhi",
+      sampleCurrent,
+      []
+    );
+    expect(missingLoc.city).toBe("Delhi");
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("AQ upstream failed"));
+    const aqFail = await resolveTargetCityAirQuality(
+      "What is AQI in Mumbai?",
+      "Delhi",
+      sampleCurrent,
+      []
+    );
+    expect(aqFail.city).toBe("Delhi");
 
     const baseTime = new Date("2026-11-25T10:00:00Z");
     const times = Array.from({ length: 24 }, (_, i) =>

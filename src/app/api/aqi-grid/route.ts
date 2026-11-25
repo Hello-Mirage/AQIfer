@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchJsonWithTimeout, getErrorMessage } from "@/lib/http";
+import { fetchJsonWithTimeout, getErrorMessage, parseCoordinates } from "@/lib/http";
 import {
   buildAqiGridPoints,
   createFallbackAqiGrid,
@@ -9,16 +9,21 @@ import {
 
 export const runtime = "edge";
 
+const DEFAULT_LAT = 28.6139;
+const DEFAULT_LON = 77.209;
 const CACHE_HEADER = "public, s-maxage=300, stale-while-revalidate=600";
 
 /** Return a 3x3 color-coded AQI grid around the requested coordinate pair. */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const lat = parseFloat(searchParams.get("lat") || "28.6139");
-  const lon = parseFloat(searchParams.get("lon") || "77.2090");
+  const coords = parseCoordinates(searchParams, DEFAULT_LAT, DEFAULT_LON);
 
-  const lats = GRID_SPATIAL_OFFSETS.map((o) => (lat + o.dLat).toFixed(4)).join(",");
-  const lons = GRID_SPATIAL_OFFSETS.map((o) => (lon + o.dLon).toFixed(4)).join(",");
+  if (!coords) {
+    return NextResponse.json({ error: "Invalid latitude or longitude query parameter." }, { status: 400 });
+  }
+
+  const lats = GRID_SPATIAL_OFFSETS.map((o) => (coords.latitude + o.dLat).toFixed(4)).join(",");
+  const lons = GRID_SPATIAL_OFFSETS.map((o) => (coords.longitude + o.dLon).toFixed(4)).join(",");
 
   try {
     const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lats}&longitude=${lons}&current=pm2_5,us_aqi&timezone=auto`;
@@ -30,7 +35,7 @@ export async function GET(req: NextRequest) {
     }
 
     const items = Array.isArray(raw) ? raw : [raw];
-    const points = buildAqiGridPoints(items, lat, lon);
+    const points = buildAqiGridPoints(items, coords.latitude, coords.longitude);
 
     return NextResponse.json(
       { points },
@@ -38,6 +43,8 @@ export async function GET(req: NextRequest) {
     );
   } catch (err: unknown) {
     console.warn("AQI grid fallback:", getErrorMessage(err));
-    return NextResponse.json({ points: createFallbackAqiGrid(lat, lon) });
+    return NextResponse.json({
+      points: createFallbackAqiGrid(coords.latitude, coords.longitude),
+    });
   }
 }
